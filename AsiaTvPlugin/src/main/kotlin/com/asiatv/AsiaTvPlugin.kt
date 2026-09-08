@@ -2264,7 +2264,7 @@ class AsiaTvPlugin : MainAPI() {
     // Emit links
     // =========================================================
 
-    private fun emitDirectMedia(
+    private suspend fun emitDirectMedia(
         url: String,
         referer: String,
         callback: (ExtractorLink) -> Unit
