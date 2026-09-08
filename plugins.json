@@ -2,14 +2,19 @@
   {
     "name": "AsiaTv",
     "internalName": "AsiaTv",
-    "url": "https://raw.githubusercontent.com/moumadabdrahim-dot/plugins/main/AsiaTvPlugin/src/main/kotlin/com/asiatv/AsiaTvPlugin.kt",
+    "url": "https://raw.githubusercontent.com/moumadabdrahim-dot/plugins/main/builds/AsiaTv.cs3",
     "version": 1,
     "language": "ar",
-    "fileSize": 8000,
     "status": 1,
     "iconUrl": "https://as1tv.com/wp-content/uploads/2021/09/cropped-asiadrama-270x270.png",
-    "authors": ["moumadabdrahim"],
-    "tvTypes": ["AsianDrama", "Movie", "TvSeries"],
+    "authors": [
+      "moumadabdrahim"
+    ],
+    "tvTypes": [
+      "AsianDrama",
+      "Movie",
+      "TvSeries"
+    ],
     "repositoryUrl": "https://github.com/moumadabdrahim-dot/plugins"
   }
 ]
