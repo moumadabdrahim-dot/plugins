@@ -28,18 +28,13 @@ jobs:
           ref: builds
           path: builds
 
-      - name: Clone CloudStream extensions
+      - name: Clone CloudStream TestPlugins template
         run: |
-          git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/recloudstream/cloudstream-extensions.git template
+          git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/recloudstream/TestPlugins.git template
 
       - name: Copy plugin to template
         run: |
           cp -r src/AsiaTvPlugin template/AsiaTvPlugin
-
-      - name: Add plugin to settings
-        run: |
-          echo "" >> template/settings.gradle.kts
-          echo 'include(":AsiaTvPlugin")' >> template/settings.gradle.kts
 
       - name: Clean old builds
         run: rm -f $GITHUB_WORKSPACE/builds/*.cs3 || true
