@@ -1,38 +1,4 @@
-name: Build CloudStream Plugin
-
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Clone CloudStream template
-        run: |
-          git clone --depth 1 https://github.com/recloudstream/TestPlugins.git cloudstream-template
-
-      - name: Copy AsiaTvPlugin
-        run: |
-          rm -rf cloudstream-template/AsiaTvPlugin
-          cp -r AsiaTvPlugin cloudstream-template/AsiaTvPlugin
-
-      - name: Align Kotlin with current CloudStream
+- name: Align CloudStream build tools
         working-directory: cloudstream-template
         run: |
           python3 - <<'PY'
@@ -41,72 +7,24 @@ jobs:
           path = Path("build.gradle.kts")
           text = path.read_text()
 
-          old = 'classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0")'
-          new = 'classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")'
+          text = text.replace(
+              'classpath("com.github.recloudstream:gradle:-SNAPSHOT")',
+              'classpath("com.github.recloudstream:gradle:81b1d424d2")'
+          )
 
-          if old not in text:
-              raise SystemExit(
-                  "Expected Kotlin 2.1.0 declaration was not found"
-              )
+          text = text.replace(
+              'classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0")',
+              'classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.20")'
+          )
 
-          path.write_text(text.replace(old, new, 1))
+          path.write_text(text)
 
-          print("Kotlin Gradle Plugin aligned to 2.4.0")
+          print("CloudStream Gradle Plugin pinned to 81b1d424d2")
+          print("Kotlin Gradle Plugin aligned to 2.3.20")
           PY
 
-          echo "Current Kotlin Gradle Plugin:"
+          echo "CloudStream Gradle Plugin:"
+          grep -n "com.github.recloudstream:gradle" build.gradle.kts
+
+          echo "Kotlin Gradle Plugin:"
           grep -n "kotlin-gradle-plugin" build.gradle.kts
-
-      - name: Make Gradle executable
-        working-directory: cloudstream-template
-        run: |
-          chmod +x gradlew
-
-      - name: Show Gradle projects
-        working-directory: cloudstream-template
-        run: |
-          ./gradlew projects --no-daemon
-
-      - name: Build AsiaTvPlugin
-        working-directory: cloudstream-template
-        env:
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          ./gradlew :AsiaTvPlugin:make --no-daemon --stacktrace
-
-      - name: Find generated CS3
-        run: |
-          echo "Searching for generated .cs3 files..."
-
-          find cloudstream-template -type f -name "*.cs3" -print
-
-      - name: Copy CS3 to builds
-        run: |
-          mkdir -p builds
-
-          CS3_FILE=$(find cloudstream-template -type f -name "*.cs3" | head -n 1)
-
-          if [ -z "$CS3_FILE" ]; then
-            echo "ERROR: No .cs3 file was generated."
-            exit 1
-          fi
-
-          echo "Generated plugin:"
-          echo "$CS3_FILE"
-
-          cp "$CS3_FILE" builds/
-
-      - name: Commit and push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add builds/
-
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-            exit 0
-          fi
-
-          git commit -m "Build AsiaTvPlugin"
-          git push
