@@ -32,6 +32,31 @@ jobs:
           rm -rf cloudstream-template/AsiaTvPlugin
           cp -r AsiaTvPlugin cloudstream-template/AsiaTvPlugin
 
+      - name: Align Kotlin with current CloudStream
+        working-directory: cloudstream-template
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("build.gradle.kts")
+          text = path.read_text()
+
+          old = 'classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0")'
+          new = 'classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")'
+
+          if old not in text:
+              raise SystemExit(
+                  "Expected Kotlin 2.1.0 declaration was not found"
+              )
+
+          path.write_text(text.replace(old, new, 1))
+
+          print("Kotlin Gradle Plugin aligned to 2.4.0")
+          PY
+
+          echo "Current Kotlin Gradle Plugin:"
+          grep -n "kotlin-gradle-plugin" build.gradle.kts
+
       - name: Make Gradle executable
         working-directory: cloudstream-template
         run: |
