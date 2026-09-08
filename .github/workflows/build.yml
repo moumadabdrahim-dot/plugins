@@ -19,7 +19,7 @@ jobs:
 
       - name: Clone CloudStream template
         run: |
-          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/recloudstream/cloudstream-extensions-template.git cloudstream-template
+          git clone https://github.com/recloudstream/cloudstream-extensions.git cloudstream-template
 
       - name: Add AsiaTvPlugin to template
         run: |
