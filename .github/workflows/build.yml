@@ -1,94 +1,58 @@
-name: Build Plugin
+name: Build CloudStream Plugin
+
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
+
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-      - name: Clone and Build
+      - name: Checkout plugins repository
+        uses: actions/checkout@v4
+
+      - name: Clone CloudStream template
         run: |
-          git clone https://github.com/recloudstream/cloudstream-extensions-template.git template --depth=1
-          cp -r AsiaTvPlugin template/
-          cd template
-          echo "include ':AsiaTvPlugin'" >> settings.gradle
+          git clone https://github.com/recloudstream/cloudstream-extensions-template.git cloudstream-template
+
+      - name: Add AsiaTvPlugin to template
+        run: |
+          cp -r AsiaTvPlugin cloudstream-template/AsiaTvPlugin
+
+          echo "" >> cloudstream-template/settings.gradle
+          echo "include ':AsiaTvPlugin'" >> cloudstream-template/settings.gradle
+
+      - name: Build AsiaTvPlugin
+        working-directory: cloudstream-template
+        run: |
           chmod +x gradlew
-          ./gradlew :AsiaTvPlugin:assembleRelease --no-daemon
-      - name: Push builds
+          ./gradlew :AsiaTvPlugin:assembleRelease
+
+      - name: Copy built plugin
         run: |
           mkdir -p builds
-          find template -name "*.cs3" -exec cp {} builds/ \;
-          git config user.email "action@github.com"
-          git config user.name "GitHub Action"
-          git add builds/
-          git diff --staged --quiet || git commit -m "Build plugins"
-          git push          find template -name "*.cs3" | xargs -I{} cp {} builds/ || true
-          ls -la builds/
 
-      - name: Push builds
-        run: |
-          git config user.email "action@github.com"
-          git config user.name "GitHub Action"
-          git add builds/
-          git diff --staged --quiet || git commit -m "Build: add compiled plugins"
-          git push      - name: Update plugins.json
-        run: |
-          SIZE=$(wc -c < builds/AsiaTv.cs3 2>/dev/null || echo 20000)
-          cat > plugins.json << EOF
-          [
-            {
-              "name": "AsiaTv",
-              "internalName": "AsiaTv",
-              "url": "https://raw.githubusercontent.com/moumadabdrahim-dot/plugins/main/builds/AsiaTv.cs3",
-              "version": 1,
-              "language": "ar",
-              "fileSize": $SIZE,
-              "status": 1,
-              "iconUrl": "https://as1tv.com/wp-content/uploads/2021/09/cropped-asiadrama-270x270.png",
-              "authors": ["moumadabdrahim"],
-              "tvTypes": ["AsianDrama", "Movie", "TvSeries"],
-              "repositoryUrl": "https://github.com/moumadabdrahim-dot/plugins"
-            }
-          ]
-          EOF
+          find cloudstream-template/AsiaTvPlugin/build/outputs \
+            -type f \
+            -name "*.cs3" \
+            -exec cp {} builds/ \;
 
-      - name: Push builds
+      - name: Commit and push changes
         run: |
-          git config user.email "action@github.com"
-          git config user.name "GitHub Action"
-          git add builds/ plugins.json
-          git commit -m "Build plugins" || echo "Nothing to commit"
-          git push        run: |
-          cat > plugins.json << 'EOF'
-          [
-            {
-              "name": "AsiaTv",
-              "internalName": "AsiaTv",
-              "url": "https://raw.githubusercontent.com/moumadabdrahim-dot/plugins/builds/AsiaTv.cs3",
-              "version": 1,
-              "language": "ar",
-              "fileSize": 20000,
-              "status": 1,
-              "iconUrl": "https://as1tv.com/wp-content/uploads/2021/09/cropped-asiadrama-270x270.png",
-              "authors": ["moumadabdrahim"],
-              "tvTypes": ["AsianDrama", "Movie", "TvSeries"],
-              "repositoryUrl": "https://github.com/moumadabdrahim-dot/plugins"
-            }
-          ]
-          EOF
-          
-      - name: Push builds
-        run: |
-          git config user.email "action@github.com"
-          git config user.name "GitHub Action"
-          git add builds/ plugins.json
-          git commit -m "Build plugins"
-          git push
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add builds/
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Build AsiaTvPlugin"
+            git push
+          fi
