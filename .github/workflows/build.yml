@@ -1,10 +1,8 @@
 name: Build Plugin
-
 on:
   push:
     branches: [main]
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -12,29 +10,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup JDK
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-
-      - name: Clone CloudStream template
+      - name: Clone and Build
         run: |
           git clone https://github.com/recloudstream/cloudstream-extensions-template.git template --depth=1
           cp -r AsiaTvPlugin template/
-
-      - name: Build
-        run: |
           cd template
           echo "include ':AsiaTvPlugin'" >> settings.gradle
           chmod +x gradlew
           ./gradlew :AsiaTvPlugin:assembleRelease --no-daemon
-
-      - name: Collect builds
+      - name: Push builds
         run: |
           mkdir -p builds
-          find template -name "*.cs3" | xargs -I{} cp {} builds/ || true
+          find template -name "*.cs3" -exec cp {} builds/ \;
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git add builds/
+          git diff --staged --quiet || git commit -m "Build plugins"
+          git push          find template -name "*.cs3" | xargs -I{} cp {} builds/ || true
           ls -la builds/
 
       - name: Push builds
