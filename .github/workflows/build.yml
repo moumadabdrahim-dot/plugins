@@ -38,6 +38,10 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          # ----------------------------------------
+          # Fix root build.gradle.kts
+          # ----------------------------------------
+
           path = Path("build.gradle.kts")
           text = path.read_text()
 
@@ -63,20 +67,63 @@ jobs:
                   print(f"Not present: {old}")
 
           path.write_text(text)
+
+          # ----------------------------------------
+          # Fix Gradle Wrapper
+          # ----------------------------------------
+
+          wrapper = Path("gradle/wrapper/gradle-wrapper.properties")
+
+          if not wrapper.exists():
+              raise SystemExit(
+                  "ERROR: gradle/wrapper/gradle-wrapper.properties not found"
+              )
+
+          wrapper_text = wrapper.read_text()
+
+          old_distribution = "gradle-8.12-bin.zip"
+          new_distribution = "gradle-8.13-bin.zip"
+
+          if old_distribution in wrapper_text:
+              wrapper_text = wrapper_text.replace(
+                  old_distribution,
+                  new_distribution
+              )
+              print(
+                  f"Updated Gradle Wrapper: "
+                  f"{old_distribution} -> {new_distribution}"
+              )
+          elif "gradle-8.13-bin.zip" in wrapper_text:
+              print("Gradle Wrapper is already 8.13.")
+          else:
+              print("WARNING: Gradle Wrapper version was not 8.12.")
+
+          wrapper.write_text(wrapper_text)
           PY
 
           echo "========================================"
-          echo "Final CloudStream build configuration"
+          echo "Final build.gradle.kts configuration"
           echo "========================================"
 
           grep -n "com.android.tools.build:gradle" build.gradle.kts || true
           grep -n "com.github.recloudstream:gradle" build.gradle.kts || true
           grep -n "kotlin-gradle-plugin" build.gradle.kts || true
 
+          echo "========================================"
+          echo "Final Gradle Wrapper configuration"
+          echo "========================================"
+
+          cat gradle/wrapper/gradle-wrapper.properties
+
       - name: Make Gradle executable
         working-directory: cloudstream-template
         run: |
           chmod +x gradlew
+
+      - name: Show Gradle version
+        working-directory: cloudstream-template
+        run: |
+          ./gradlew --version
 
       - name: Show Gradle projects
         working-directory: cloudstream-template
@@ -90,7 +137,9 @@ jobs:
 
       - name: Find generated CS3
         run: |
+          echo "========================================"
           echo "Searching for generated .cs3 files..."
+          echo "========================================"
 
           find cloudstream-template \
             -type f \
@@ -118,7 +167,10 @@ jobs:
 
           cp "$CS3_FILE" builds/
 
+          echo "========================================"
           echo "Contents of builds:"
+          echo "========================================"
+
           ls -lah builds/
 
       - name: Commit and push
