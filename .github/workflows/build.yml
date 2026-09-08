@@ -32,6 +32,11 @@ jobs:
         run: |
           git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/recloudstream/TestPlugins.git template
 
+      - name: Fix Kotlin version in template
+        run: |
+          sed -i 's/kotlin-gradle-plugin:2.1.0/kotlin-gradle-plugin:2.4.0/' template/build.gradle.kts
+          grep "kotlin-gradle-plugin" template/build.gradle.kts
+
       - name: Copy plugin to template
         run: |
           cp -r src/AsiaTvPlugin template/AsiaTvPlugin
