@@ -2,5 +2,7 @@
   "name": "AsiaTv Plugins",
   "description": "دراما آسيوية مترجمة",
   "manifestVersion": 1,
-  "pluginLists": ["https://raw.githubusercontent.com/moumadabdrahim-dot/plugins/main/plugins.json"]
+  "pluginLists": [
+    "https://raw.githubusercontent.com/moumadabdrahim-dot/plugins/main/plugins.json"
+  ]
 }
