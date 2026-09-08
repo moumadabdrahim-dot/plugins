@@ -1,254 +1,58 @@
-name: Build CloudStream Plugin
+name: Build
+
+concurrency:
+  group: build
+  cancel-in-progress: true
 
 on:
   push:
     branches:
       - main
-    paths:
-      - 'AsiaTvPlugin/**'
-      - 'plugins.json'
-      - 'repo'
-      - '.github/workflows/build.yml'
   workflow_dispatch:
 
 permissions:
   contents: write
 
-concurrency:
-  group: cloudstream-build
-  cancel-in-progress: true
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          path: src
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v5
+      - name: Checkout builds branch
+        uses: actions/checkout@v4
+        with:
+          ref: builds
+          path: builds
+
+      - name: Clean old builds
+        run: rm -f $GITHUB_WORKSPACE/builds/*.cs3 || true
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: 17
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.5'
-
-      - name: Create temporary CloudStream build project
+      - name: Build
         run: |
-          mkdir -p .cloudstream-build
-          cp -r AsiaTvPlugin .cloudstream-build/AsiaTvPlugin
+          cd $GITHUB_WORKSPACE/src
+          chmod +x gradlew
+          ./gradlew make makePluginsJson
+          cp **/build/*.cs3 $GITHUB_WORKSPACE/builds || true
+          cp build/plugins.json $GITHUB_WORKSPACE/builds || true
 
-          cat > .cloudstream-build/settings.gradle.kts <<'EOF'
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-                  maven("https://jitpack.io")
-              }
-          }
-
-          dependencyResolutionManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  maven("https://jitpack.io")
-              }
-          }
-
-          rootProject.name = "CloudStreamPlugins"
-
-          include(":AsiaTvPlugin")
-          EOF
-
-          cat > .cloudstream-build/build.gradle.kts <<'EOF'
-          import com.android.build.gradle.BaseExtension
-          import com.lagradost.cloudstream3.gradle.CloudstreamExtension
-          import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-          import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
-
-          buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-                  maven("https://jitpack.io")
-              }
-
-              dependencies {
-                  classpath("com.android.tools.build:gradle:9.1.1")
-                  classpath("com.github.recloudstream:gradle:32895aedb6366f5075cb99bbd2e6ce0a7cac325d")
-                  classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")
-              }
-          }
-
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-                  maven("https://jitpack.io")
-              }
-          }
-
-          fun Project.cloudstream(
-              configuration: CloudstreamExtension.() -> Unit
-          ) = extensions
-              .getByName<CloudstreamExtension>("cloudstream")
-              .configuration()
-
-          fun Project.android(
-              configuration: BaseExtension.() -> Unit
-          ) = extensions
-              .getByName<BaseExtension>("android")
-              .configuration()
-
-          subprojects {
-              apply(plugin = "com.android.library")
-              apply(plugin = "kotlin-android")
-              apply(plugin = "com.lagradost.cloudstream3.gradle")
-
-              cloudstream {
-                  setRepo(
-                      System.getenv("GITHUB_REPOSITORY")
-                          ?: "moumadabdrahim-dot/plugins"
-                  )
-                  authors = listOf("moumadabdrahim")
-              }
-
-              android {
-                  namespace = "com.moumadabdrahim"
-
-                  defaultConfig {
-                      minSdk = 21
-                      compileSdkVersion(35)
-                      targetSdk = 35
-                  }
-
-                  compileOptions {
-                      sourceCompatibility = JavaVersion.VERSION_1_8
-                      targetCompatibility = JavaVersion.VERSION_1_8
-                  }
-
-                  tasks.withType<KotlinJvmCompile> {
-                      compilerOptions {
-                          jvmTarget.set(JvmTarget.JVM_1_8)
-
-                          freeCompilerArgs.addAll(
-                              "-Xno-call-assertions",
-                              "-Xno-param-assertions",
-                              "-Xno-receiver-assertions"
-                          )
-                      }
-                  }
-              }
-
-              dependencies {
-                  val implementation by configurations
-                  val cloudstream by configurations
-
-                  cloudstream(
-                      "com.lagradost:cloudstream3:pre-release"
-                  )
-
-                  implementation(kotlin("stdlib"))
-
-                  implementation(
-                      "com.github.Blatzar:NiceHttp:0.4.18"
-                  )
-
-                  implementation(
-                      "org.jsoup:jsoup:1.22.1"
-                  )
-
-                  implementation(
-                      "com.fasterxml.jackson.module:jackson-module-kotlin:2.13.1"
-                  )
-              }
-          }
-          EOF
-
-          cp AsiaTvPlugin/gradle.properties \
-             .cloudstream-build/AsiaTvPlugin/gradle.properties
-
-      - name: Show Gradle version
-        working-directory: .cloudstream-build
+      - name: Push builds
         run: |
-          gradle --version
-
-      - name: Verify CloudStream plugin tasks
-        working-directory: .cloudstream-build
-        run: |
-          gradle :AsiaTvPlugin:tasks \
-            --no-daemon \
-            --stacktrace
-
-      - name: Build AsiaTvPlugin
-        working-directory: .cloudstream-build
-        run: |
-          gradle :AsiaTvPlugin:make \
-            --no-daemon \
-            --stacktrace
-
-      - name: Find generated CS3
-        run: |
-          echo "Searching for generated .cs3 files..."
-
-          find .cloudstream-build/AsiaTvPlugin \
-            -type f \
-            -name "*.cs3" \
-            -print
-
-          CS3_FILE=$(find .cloudstream-build/AsiaTvPlugin \
-            -type f \
-            -name "*.cs3" \
-            | head -n 1)
-
-          if [ -z "$CS3_FILE" ]; then
-            echo "ERROR: No .cs3 file was generated."
-            exit 1
-          fi
-
-          echo "Generated plugin:"
-          echo "$CS3_FILE"
-
-          mkdir -p builds
-
-          cp "$CS3_FILE" builds/AsiaTv.cs3
-
-      - name: Verify AsiaTv.cs3
-        run: |
-          test -f builds/AsiaTv.cs3
-
-          SIZE=$(stat -c%s builds/AsiaTv.cs3)
-
-          echo "AsiaTv.cs3 size: $SIZE bytes"
-
-          if [ "$SIZE" -le 0 ]; then
-            echo "ERROR: AsiaTv.cs3 is empty."
-            exit 1
-          fi
-
-          echo "Plugin build verification passed."
-
-      - name: Commit generated plugin
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add builds/AsiaTv.cs3
-
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-            exit 0
-          fi
-
-          git commit -m "Build AsiaTvPlugin"
-          git push
+          cd $GITHUB_WORKSPACE/builds
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add .
+          git commit --amend -m "Build $GITHUB_SHA" || exit 0
+          git push --force
