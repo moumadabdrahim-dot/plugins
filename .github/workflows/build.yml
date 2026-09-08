@@ -30,7 +30,7 @@ jobs:
 
       - name: Clone CloudStream extensions
         run: |
-          git clone --depth 1 https://github.com/recloudstream/cloudstream-extensions.git template
+          git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/recloudstream/cloudstream-extensions.git template
 
       - name: Copy plugin to template
         run: |
