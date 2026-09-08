@@ -32,7 +32,7 @@ jobs:
           rm -rf cloudstream-template/AsiaTvPlugin
           cp -r AsiaTvPlugin cloudstream-template/AsiaTvPlugin
 
-      - name: Align CloudStream build tools
+      - name: Fix CloudStream build configuration
         working-directory: cloudstream-template
         run: |
           python3 - <<'PY'
@@ -42,33 +42,35 @@ jobs:
           text = path.read_text()
 
           replacements = {
-              'classpath("com.android.tools.build:gradle:8.6.1")':
-                  'classpath("com.android.tools.build:gradle:8.13.2")',
+              "com.android.tools.build:gradle:8.7.3":
+                  "com.android.tools.build:gradle:8.13.2",
 
-              'classpath("com.github.recloudstream:gradle:-SNAPSHOT")':
-                  'classpath("com.github.recloudstream:gradle:81b1d424d2")',
+              "com.github.recloudstream:gradle:-SNAPSHOT":
+                  "com.github.recloudstream:gradle:81b1d424d2",
 
-              'classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0")':
-                  'classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.20")',
+              "org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0":
+                  "org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.20",
+
+              "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0":
+                  "org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.20",
           }
 
           for old, new in replacements.items():
-              if old not in text:
-                  print(f"WARNING: not found: {old}")
-              else:
-                  text = text.replace(old, new, 1)
+              if old in text:
+                  text = text.replace(old, new)
                   print(f"Updated: {old} -> {new}")
+              else:
+                  print(f"Not present: {old}")
 
           path.write_text(text)
           PY
 
-          echo "===== CloudStream Gradle Plugin ====="
-          grep -n "com.github.recloudstream:gradle" build.gradle.kts || true
+          echo "========================================"
+          echo "Final CloudStream build configuration"
+          echo "========================================"
 
-          echo "===== Android Gradle Plugin ====="
           grep -n "com.android.tools.build:gradle" build.gradle.kts || true
-
-          echo "===== Kotlin Gradle Plugin ====="
+          grep -n "com.github.recloudstream:gradle" build.gradle.kts || true
           grep -n "kotlin-gradle-plugin" build.gradle.kts || true
 
       - name: Make Gradle executable
@@ -83,8 +85,6 @@ jobs:
 
       - name: Build AsiaTvPlugin
         working-directory: cloudstream-template
-        env:
-          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           ./gradlew :AsiaTvPlugin:make --no-daemon --stacktrace
 
@@ -92,23 +92,34 @@ jobs:
         run: |
           echo "Searching for generated .cs3 files..."
 
-          find cloudstream-template -type f -name "*.cs3" -print
+          find cloudstream-template \
+            -type f \
+            -name "*.cs3" \
+            -print
 
       - name: Copy CS3 to builds
         run: |
           mkdir -p builds
 
-          CS3_FILE=$(find cloudstream-template -type f -name "*.cs3" | head -n 1)
+          CS3_FILE=$(find cloudstream-template \
+            -type f \
+            -name "*.cs3" \
+            | head -n 1)
 
           if [ -z "$CS3_FILE" ]; then
             echo "ERROR: No .cs3 file was generated."
             exit 1
           fi
 
+          echo "========================================"
           echo "Generated plugin:"
           echo "$CS3_FILE"
+          echo "========================================"
 
           cp "$CS3_FILE" builds/
+
+          echo "Contents of builds:"
+          ls -lah builds/
 
       - name: Commit and push
         run: |
