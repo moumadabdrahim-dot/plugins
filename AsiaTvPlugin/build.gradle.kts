@@ -1,3 +1,1 @@
-dependencies {
-    implementation("com.lagradost:cloudstream3:pre-release")
-}
+// CloudStream dependency is provided by the TestPlugins template.
