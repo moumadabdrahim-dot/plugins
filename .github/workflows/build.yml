@@ -1,58 +1,38 @@
 name: Build CloudStream Plugin
-
 on:
   push:
     branches:
       - main
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout plugins repository
-        uses: actions/checkout@v4
-
-      - name: Clone CloudStream template
+      - uses: actions/checkout@v4
+      - name: Clone template
+        run: git clone https://github.com/recloudstream/TestPlugins.git template
+      - name: Copy plugin
         run: |
-          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/recloudstream/cloudstream-extensions.git cloudstream-template
-
-      - name: Add AsiaTvPlugin to template
-        run: |
-          cp -r AsiaTvPlugin cloudstream-template/AsiaTvPlugin
-
-          echo "" >> cloudstream-template/settings.gradle
-          echo "include ':AsiaTvPlugin'" >> cloudstream-template/settings.gradle
-
-      - name: Build AsiaTvPlugin
-        working-directory: cloudstream-template
+          rm -rf template/AsiaTvPlugin
+          cp -r AsiaTvPlugin template/
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Build
+        working-directory: template
         run: |
           chmod +x gradlew
-          ./gradlew :AsiaTvPlugin:assembleRelease
-
-      - name: Copy built plugin
+          ./gradlew :AsiaTvPlugin:make --stacktrace
+      - name: Push builds
         run: |
           mkdir -p builds
-
-          find cloudstream-template/AsiaTvPlugin/build/outputs \
-            -type f \
-            -name "*.cs3" \
-            -exec cp {} builds/ \;
-
-      - name: Commit and push changes
-        run: |
+          find template -name "*.cs3" -exec cp {} builds/ \;
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add builds/
-
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-          else
-            git commit -m "Build AsiaTvPlugin"
-            git push
-          fi
+          git diff --cached --quiet || git commit -m "Build AsiaTvPlugin"
+          git push
