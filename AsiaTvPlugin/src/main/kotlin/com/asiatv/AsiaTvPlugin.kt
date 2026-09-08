@@ -21,7 +21,7 @@ class AsiaTvPlugin : MainAPI() {
     // ==============================
     override val mainPage = mainPageOf(
         "$mainUrl/types/%d8%a7%d9%84%d8%af%d8%b1%d8%a7%d9%85%d8%a7-%d8%a7%d9%84%d9%83%d9%88%d8%b1%d9%8a%d8%a9/" to "الدراما الكورية",
-        "$mainUrl/types/%d8%a7%d9%84%d8%af%d8%b1%d8%a7%d9%85%d8%a7-%d8%a7%d9%84%d8%b5%d9%8a%d9%86%d9%8a%d8%a9/" to "الدراما الصينية",
+        "$mainUrl/types/%d8%a7%d9%84%d8%b1%d8%a7%d9%85%d8%a7-%d8%a7%d9%84%d8%b5%d9%8a%d9%86%d9%8a%d8%a9/" to "الدراما الصينية",
         "$mainUrl/types/%d8%a7%d9%84%d8%af%d8%b1%d8%a7%d9%85%d8%a7-%d8%a7%d9%84%d8%aa%d8%a7%d9%8a%d9%84%d9%86%d8%af%d9%8a%d8%a9/" to "الدراما التايلاندية",
         "$mainUrl/types/%d8%a7%d9%84%d8%af%d8%b1%d8%a7%d9%85%d8%a7-%d8%a7%d9%84%d9%8a%d8%a7%d8%a8%d8%a7%d9%86%d9%8a%d8%a9/" to "الدراما اليابانية",
         "$mainUrl/types/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/" to "أفلام آسيوية",
@@ -270,10 +270,11 @@ class AsiaTvPlugin : MainAPI() {
                         source = name,
                         name = name,
                         url = m3u.value,
-                        referer = data,
-                        quality = Qualities.Unknown.value,
-                        isM3u8 = true
-                    )
+                        type = ExtractorLinkType.M3U8
+                    ) {
+                        this.referer = data
+                        this.quality = Qualities.Unknown.value
+                    }
                 )
             }
 
@@ -289,10 +290,11 @@ class AsiaTvPlugin : MainAPI() {
                         source = name,
                         name = "$name MP4",
                         url = mp4.value,
-                        referer = data,
-                        quality = Qualities.Unknown.value,
-                        isM3u8 = false
-                    )
+                        type = ExtractorLinkType.VIDEO
+                    ) {
+                        this.referer = data
+                        this.quality = Qualities.Unknown.value
+                    }
                 )
             }
         }
@@ -309,10 +311,11 @@ class AsiaTvPlugin : MainAPI() {
                     source = name,
                     name = "$name Direct",
                     url = it.value,
-                    referer = data,
-                    quality = Qualities.Unknown.value,
-                    isM3u8 = true
-                )
+                    type = ExtractorLinkType.M3U8
+                ) {
+                    this.referer = data
+                    this.quality = Qualities.Unknown.value
+                }
             )
         }
 
