@@ -4,10 +4,19 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'AsiaTvPlugin/**'
+      - 'plugins.json'
+      - 'repo'
+      - '.github/workflows/build.yml'
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: cloudstream-build
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -16,100 +25,220 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
-      - name: Clone CloudStream TestPlugins
-        run: |
-          git clone --depth 1 https://github.com/recloudstream/TestPlugins.git cloudstream-template
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Copy AsiaTvPlugin into template
-        run: |
-          rm -rf cloudstream-template/AsiaTvPlugin
-          cp -r AsiaTvPlugin cloudstream-template/AsiaTvPlugin
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5'
 
-      - name: Prepare Gradle
-        working-directory: cloudstream-template
+      - name: Create temporary CloudStream build project
         run: |
-          chmod +x gradlew
+          mkdir -p .cloudstream-build
+          cp -r AsiaTvPlugin .cloudstream-build/AsiaTvPlugin
+
+          cat > .cloudstream-build/settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+                  maven("https://jitpack.io")
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  maven("https://jitpack.io")
+              }
+          }
+
+          rootProject.name = "CloudStreamPlugins"
+
+          include(":AsiaTvPlugin")
+          EOF
+
+          cat > .cloudstream-build/build.gradle.kts <<'EOF'
+          import com.android.build.gradle.BaseExtension
+          import com.lagradost.cloudstream3.gradle.CloudstreamExtension
+          import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+          import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
+
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+                  maven("https://jitpack.io")
+              }
+
+              dependencies {
+                  classpath("com.android.tools.build:gradle:9.1.1")
+                  classpath("com.github.recloudstream:gradle:32895aedb6366f5075cb99bbd2e6ce0a7cac325d")
+                  classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")
+              }
+          }
+
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+                  maven("https://jitpack.io")
+              }
+          }
+
+          fun Project.cloudstream(
+              configuration: CloudstreamExtension.() -> Unit
+          ) = extensions
+              .getByName<CloudstreamExtension>("cloudstream")
+              .configuration()
+
+          fun Project.android(
+              configuration: BaseExtension.() -> Unit
+          ) = extensions
+              .getByName<BaseExtension>("android")
+              .configuration()
+
+          subprojects {
+              apply(plugin = "com.android.library")
+              apply(plugin = "kotlin-android")
+              apply(plugin = "com.lagradost.cloudstream3.gradle")
+
+              cloudstream {
+                  setRepo(
+                      System.getenv("GITHUB_REPOSITORY")
+                          ?: "moumadabdrahim-dot/plugins"
+                  )
+                  authors = listOf("moumadabdrahim")
+              }
+
+              android {
+                  namespace = "com.moumadabdrahim"
+
+                  defaultConfig {
+                      minSdk = 21
+                      compileSdkVersion(35)
+                      targetSdk = 35
+                  }
+
+                  compileOptions {
+                      sourceCompatibility = JavaVersion.VERSION_1_8
+                      targetCompatibility = JavaVersion.VERSION_1_8
+                  }
+
+                  tasks.withType<KotlinJvmCompile> {
+                      compilerOptions {
+                          jvmTarget.set(JvmTarget.JVM_1_8)
+
+                          freeCompilerArgs.addAll(
+                              "-Xno-call-assertions",
+                              "-Xno-param-assertions",
+                              "-Xno-receiver-assertions"
+                          )
+                      }
+                  }
+              }
+
+              dependencies {
+                  val implementation by configurations
+                  val cloudstream by configurations
+
+                  cloudstream(
+                      "com.lagradost:cloudstream3:pre-release"
+                  )
+
+                  implementation(kotlin("stdlib"))
+
+                  implementation(
+                      "com.github.Blatzar:NiceHttp:0.4.18"
+                  )
+
+                  implementation(
+                      "org.jsoup:jsoup:1.22.1"
+                  )
+
+                  implementation(
+                      "com.fasterxml.jackson.module:jackson-module-kotlin:2.13.1"
+                  )
+              }
+          }
+          EOF
+
+          cp AsiaTvPlugin/gradle.properties \
+             .cloudstream-build/AsiaTvPlugin/gradle.properties
 
       - name: Show Gradle version
-        working-directory: cloudstream-template
+        working-directory: .cloudstream-build
         run: |
-          ./gradlew --version
+          gradle --version
 
-      - name: Verify AsiaTvPlugin project
-        working-directory: cloudstream-template
+      - name: Verify CloudStream plugin tasks
+        working-directory: .cloudstream-build
         run: |
-          ./gradlew :AsiaTvPlugin:tasks --no-daemon --stacktrace
+          gradle :AsiaTvPlugin:tasks \
+            --no-daemon \
+            --stacktrace
 
       - name: Build AsiaTvPlugin
-        working-directory: cloudstream-template
+        working-directory: .cloudstream-build
         run: |
-          ./gradlew :AsiaTvPlugin:make --no-daemon --stacktrace
+          gradle :AsiaTvPlugin:make \
+            --no-daemon \
+            --stacktrace
 
       - name: Find generated CS3
         run: |
-          echo "Searching for AsiaTvPlugin .cs3..."
+          echo "Searching for generated .cs3 files..."
 
-          find cloudstream-template/AsiaTvPlugin \
+          find .cloudstream-build/AsiaTvPlugin \
             -type f \
             -name "*.cs3" \
             -print
 
-          CS3_FILE=$(find cloudstream-template/AsiaTvPlugin \
+          CS3_FILE=$(find .cloudstream-build/AsiaTvPlugin \
             -type f \
             -name "*.cs3" \
             | head -n 1)
 
           if [ -z "$CS3_FILE" ]; then
-            echo "ERROR: AsiaTvPlugin .cs3 was not generated."
+            echo "ERROR: No .cs3 file was generated."
             exit 1
           fi
 
-          echo "Generated file:"
+          echo "Generated plugin:"
           echo "$CS3_FILE"
 
-      - name: Copy plugin to builds
-        run: |
           mkdir -p builds
-
-          CS3_FILE=$(find cloudstream-template/AsiaTvPlugin \
-            -type f \
-            -name "*.cs3" \
-            | head -n 1)
-
-          if [ -z "$CS3_FILE" ]; then
-            echo "ERROR: No .cs3 file found."
-            exit 1
-          fi
 
           cp "$CS3_FILE" builds/AsiaTv.cs3
 
-          echo "========================================"
-          echo "Final plugin file:"
-          echo "========================================"
-
-          ls -lh builds/AsiaTv.cs3
-
-      - name: Verify plugin file
+      - name: Verify AsiaTv.cs3
         run: |
           test -f builds/AsiaTv.cs3
 
-          FILE_SIZE=$(stat -c%s builds/AsiaTv.cs3)
+          SIZE=$(stat -c%s builds/AsiaTv.cs3)
 
-          echo "AsiaTv.cs3 size: ${FILE_SIZE} bytes"
+          echo "AsiaTv.cs3 size: $SIZE bytes"
 
-          if [ "$FILE_SIZE" -le 0 ]; then
+          if [ "$SIZE" -le 0 ]; then
             echo "ERROR: AsiaTv.cs3 is empty."
             exit 1
           fi
 
-      - name: Commit and push generated plugin
+          echo "Plugin build verification passed."
+
+      - name: Commit generated plugin
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
