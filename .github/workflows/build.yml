@@ -32,22 +32,15 @@ jobs:
           rm -rf cloudstream-template/AsiaTvPlugin
           cp -r AsiaTvPlugin cloudstream-template/AsiaTvPlugin
 
-      - name: Enable AsiaTvPlugin in settings
-        working-directory: cloudstream-template
-        run: |
-          if [ -f "AsiaTvPlugin/build.gradle" ]; then
-            echo 'include("AsiaTvPlugin")' >> settings.gradle.kts
-          elif [ -f "AsiaTvPlugin/build.gradle.kts" ]; then
-            echo 'include("AsiaTvPlugin")' >> settings.gradle.kts
-          else
-            echo "ERROR: No Gradle build file found in AsiaTvPlugin"
-            exit 1
-          fi
-
       - name: Make Gradle executable
         working-directory: cloudstream-template
         run: |
           chmod +x gradlew
+
+      - name: Show Gradle projects
+        working-directory: cloudstream-template
+        run: |
+          ./gradlew projects --no-daemon
 
       - name: Build AsiaTvPlugin
         working-directory: cloudstream-template
@@ -59,6 +52,7 @@ jobs:
       - name: Find generated CS3
         run: |
           echo "Searching for generated .cs3 files..."
+
           find cloudstream-template -type f -name "*.cs3" -print
 
       - name: Copy CS3 to builds
