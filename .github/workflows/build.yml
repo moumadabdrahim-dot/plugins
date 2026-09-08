@@ -16,6 +16,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
@@ -28,38 +29,90 @@ jobs:
           ref: builds
           path: builds
 
-      - name: Clone CloudStream TestPlugins template
+      - name: Clone CloudStream TestPlugins
         run: |
-          git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/recloudstream/TestPlugins.git template
+          git clone --depth 1 https://github.com/recloudstream/TestPlugins.git template
 
-      - name: Copy plugin to template
+      - name: Copy plugin
         run: |
+          rm -rf template/AsiaTvPlugin
           cp -r src/AsiaTvPlugin template/AsiaTvPlugin
-
-      - name: Clean old builds
-        run: rm -f $GITHUB_WORKSPACE/builds/*.cs3 || true
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Build
+      - name: Update CloudStream build environment
+        working-directory: template
         run: |
-          cd template
-          chmod +x gradlew
-          ./gradlew :AsiaTvPlugin:make --no-daemon --stacktrace --refresh-dependencies
-          find . -name "*.cs3" -exec cp {} $GITHUB_WORKSPACE/builds/AsiaTv.cs3 \;
+          python3 - <<'PY'
+          from pathlib import Path
 
-      - name: Push builds
+          p = Path("build.gradle.kts")
+          s = p.read_text()
+
+          s = s.replace(
+              'classpath("com.android.tools.build:gradle:8.7.3")',
+              'classpath("com.android.tools.build:gradle:9.1.1")'
+          )
+
+          s = s.replace(
+              'classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0")',
+              'classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")'
+          )
+
+          p.write_text(s)
+          PY
+
+      - name: Build plugin
+        working-directory: template
         run: |
-          cd $GITHUB_WORKSPACE/builds
+          gradle :AsiaTvPlugin:make \
+            --no-daemon \
+            --stacktrace \
+            --refresh-dependencies
+
+      - name: Locate build
+        run: |
+          echo "Searching for generated .cs3 files..."
+          find template -type f -name "*.cs3" -print
+
+      - name: Publish build
+        run: |
+          rm -f "$GITHUB_WORKSPACE/builds/"*.cs3
+
+          find template -type f -name "*.cs3" -exec \
+            cp {} "$GITHUB_WORKSPACE/builds/AsiaTv.cs3" \;
+
+          if [ ! -f "$GITHUB_WORKSPACE/builds/AsiaTv.cs3" ]; then
+            echo "ERROR: AsiaTv.cs3 was not generated."
+            exit 1
+          fi
+
+          ls -lh "$GITHUB_WORKSPACE/builds/AsiaTv.cs3"
+
+      - name: Push builds branch
+        working-directory: builds
+        run: |
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
-          git add .
-          git commit --amend -m "Build $GITHUB_SHA" || exit 0
-          git push --force
+
+          git add AsiaTv.cs3
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Build AsiaTv $GITHUB_SHA"
+          git push origin builds
