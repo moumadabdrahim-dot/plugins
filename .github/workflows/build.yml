@@ -33,7 +33,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/recloudstream/TestPlugins.git template
 
-      - name: Copy plugin
+      - name: Copy AsiaTv plugin
         run: |
           rm -rf template/AsiaTvPlugin
           cp -r src/AsiaTvPlugin template/AsiaTvPlugin
@@ -44,61 +44,62 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Gradle
+      - name: Setup Gradle cache
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Update CloudStream build environment
+      - name: Install Android SDK 35
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Update Kotlin version
         working-directory: template
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          p = Path("build.gradle.kts")
-          s = p.read_text()
+          path = Path("build.gradle.kts")
+          text = path.read_text()
 
-          s = s.replace(
-              'classpath("com.android.tools.build:gradle:8.7.3")',
-              'classpath("com.android.tools.build:gradle:9.1.1")'
-          )
+          old = 'classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0")'
+          new = 'classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")'
 
-          s = s.replace(
-              'classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0")',
-              'classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")'
-          )
+          if old not in text:
+              raise SystemExit("Expected Kotlin 2.1.0 line was not found")
 
-          p.write_text(s)
+          path.write_text(text.replace(old, new))
           PY
 
-      - name: Build plugin
+      - name: Build AsiaTv
         working-directory: template
         run: |
-          gradle :AsiaTvPlugin:make \
+          chmod +x gradlew
+          ./gradlew :AsiaTvPlugin:make \
             --no-daemon \
             --stacktrace \
             --refresh-dependencies
 
-      - name: Locate build
+      - name: Find generated plugin
         run: |
-          echo "Searching for generated .cs3 files..."
+          echo "Generated .cs3 files:"
           find template -type f -name "*.cs3" -print
 
-      - name: Publish build
+      - name: Publish AsiaTv.cs3
         run: |
-          rm -f "$GITHUB_WORKSPACE/builds/"*.cs3
+          rm -f "$GITHUB_WORKSPACE/builds/AsiaTv.cs3"
 
-          find template -type f -name "*.cs3" -exec \
-            cp {} "$GITHUB_WORKSPACE/builds/AsiaTv.cs3" \;
+          CS3_FILE="$(find template/AsiaTvPlugin -type f -name "*.cs3" | head -n 1)"
 
-          if [ ! -f "$GITHUB_WORKSPACE/builds/AsiaTv.cs3" ]; then
-            echo "ERROR: AsiaTv.cs3 was not generated."
+          if [ -z "$CS3_FILE" ]; then
+            echo "ERROR: No .cs3 file was generated"
             exit 1
           fi
 
+          cp "$CS3_FILE" "$GITHUB_WORKSPACE/builds/AsiaTv.cs3"
+
+          echo "Published:"
           ls -lh "$GITHUB_WORKSPACE/builds/AsiaTv.cs3"
 
       - name: Push builds branch
@@ -110,9 +111,9 @@ jobs:
           git add AsiaTv.cs3
 
           if git diff --cached --quiet; then
-            echo "No changes to commit."
+            echo "No changes to commit"
             exit 0
           fi
 
-          git commit -m "Build AsiaTv $GITHUB_SHA"
+          git commit -m "Build AsiaTv from $GITHUB_SHA"
           git push origin builds
