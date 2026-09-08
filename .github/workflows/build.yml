@@ -21,101 +21,18 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
-      - name: Clone CloudStream template
+      - name: Clone CloudStream TestPlugins
         run: |
           git clone --depth 1 https://github.com/recloudstream/TestPlugins.git cloudstream-template
 
-      - name: Copy AsiaTvPlugin
+      - name: Copy AsiaTvPlugin into template
         run: |
           rm -rf cloudstream-template/AsiaTvPlugin
           cp -r AsiaTvPlugin cloudstream-template/AsiaTvPlugin
 
-      - name: Fix CloudStream build configuration
-        working-directory: cloudstream-template
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          # ----------------------------------------
-          # Fix root build.gradle.kts
-          # ----------------------------------------
-
-          path = Path("build.gradle.kts")
-          text = path.read_text()
-
-          replacements = {
-              "com.android.tools.build:gradle:8.7.3":
-                  "com.android.tools.build:gradle:8.13.2",
-
-              "com.github.recloudstream:gradle:-SNAPSHOT":
-                  "com.github.recloudstream:gradle:81b1d424d2",
-
-              "org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0":
-                  "org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.20",
-
-              "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0":
-                  "org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.20",
-          }
-
-          for old, new in replacements.items():
-              if old in text:
-                  text = text.replace(old, new)
-                  print(f"Updated: {old} -> {new}")
-              else:
-                  print(f"Not present: {old}")
-
-          path.write_text(text)
-
-          # ----------------------------------------
-          # Fix Gradle Wrapper
-          # ----------------------------------------
-
-          wrapper = Path("gradle/wrapper/gradle-wrapper.properties")
-
-          if not wrapper.exists():
-              raise SystemExit(
-                  "ERROR: gradle/wrapper/gradle-wrapper.properties not found"
-              )
-
-          wrapper_text = wrapper.read_text()
-
-          old_distribution = "gradle-8.12-bin.zip"
-          new_distribution = "gradle-8.13-bin.zip"
-
-          if old_distribution in wrapper_text:
-              wrapper_text = wrapper_text.replace(
-                  old_distribution,
-                  new_distribution
-              )
-              print(
-                  f"Updated Gradle Wrapper: "
-                  f"{old_distribution} -> {new_distribution}"
-              )
-          elif "gradle-8.13-bin.zip" in wrapper_text:
-              print("Gradle Wrapper is already 8.13.")
-          else:
-              print("WARNING: Gradle Wrapper version was not 8.12.")
-
-          wrapper.write_text(wrapper_text)
-          PY
-
-          echo "========================================"
-          echo "Final build.gradle.kts configuration"
-          echo "========================================"
-
-          grep -n "com.android.tools.build:gradle" build.gradle.kts || true
-          grep -n "com.github.recloudstream:gradle" build.gradle.kts || true
-          grep -n "kotlin-gradle-plugin" build.gradle.kts || true
-
-          echo "========================================"
-          echo "Final Gradle Wrapper configuration"
-          echo "========================================"
-
-          cat gradle/wrapper/gradle-wrapper.properties
-
-      - name: Make Gradle executable
+      - name: Prepare Gradle
         working-directory: cloudstream-template
         run: |
           chmod +x gradlew
@@ -125,10 +42,10 @@ jobs:
         run: |
           ./gradlew --version
 
-      - name: Show Gradle projects
+      - name: Verify AsiaTvPlugin project
         working-directory: cloudstream-template
         run: |
-          ./gradlew projects --no-daemon --stacktrace
+          ./gradlew :AsiaTvPlugin:tasks --no-daemon --stacktrace
 
       - name: Build AsiaTvPlugin
         working-directory: cloudstream-template
@@ -137,48 +54,67 @@ jobs:
 
       - name: Find generated CS3
         run: |
-          echo "========================================"
-          echo "Searching for generated .cs3 files..."
-          echo "========================================"
+          echo "Searching for AsiaTvPlugin .cs3..."
 
-          find cloudstream-template \
+          find cloudstream-template/AsiaTvPlugin \
             -type f \
             -name "*.cs3" \
             -print
 
-      - name: Copy CS3 to builds
-        run: |
-          mkdir -p builds
-
-          CS3_FILE=$(find cloudstream-template \
+          CS3_FILE=$(find cloudstream-template/AsiaTvPlugin \
             -type f \
             -name "*.cs3" \
             | head -n 1)
 
           if [ -z "$CS3_FILE" ]; then
-            echo "ERROR: No .cs3 file was generated."
+            echo "ERROR: AsiaTvPlugin .cs3 was not generated."
             exit 1
           fi
 
-          echo "========================================"
-          echo "Generated plugin:"
+          echo "Generated file:"
           echo "$CS3_FILE"
+
+      - name: Copy plugin to builds
+        run: |
+          mkdir -p builds
+
+          CS3_FILE=$(find cloudstream-template/AsiaTvPlugin \
+            -type f \
+            -name "*.cs3" \
+            | head -n 1)
+
+          if [ -z "$CS3_FILE" ]; then
+            echo "ERROR: No .cs3 file found."
+            exit 1
+          fi
+
+          cp "$CS3_FILE" builds/AsiaTv.cs3
+
+          echo "========================================"
+          echo "Final plugin file:"
           echo "========================================"
 
-          cp "$CS3_FILE" builds/
+          ls -lh builds/AsiaTv.cs3
 
-          echo "========================================"
-          echo "Contents of builds:"
-          echo "========================================"
+      - name: Verify plugin file
+        run: |
+          test -f builds/AsiaTv.cs3
 
-          ls -lah builds/
+          FILE_SIZE=$(stat -c%s builds/AsiaTv.cs3)
 
-      - name: Commit and push
+          echo "AsiaTv.cs3 size: ${FILE_SIZE} bytes"
+
+          if [ "$FILE_SIZE" -le 0 ]; then
+            echo "ERROR: AsiaTv.cs3 is empty."
+            exit 1
+          fi
+
+      - name: Commit and push generated plugin
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add builds/
+          git add builds/AsiaTv.cs3
 
           if git diff --cached --quiet; then
             echo "No changes to commit."
