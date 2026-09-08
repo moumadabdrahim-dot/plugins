@@ -9,32 +9,59 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      
+      - uses: actions/checkout@v4
+
       - name: Setup JDK
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-          
+
       - name: Clone CloudStream template
         run: |
           git clone https://github.com/recloudstream/cloudstream-extensions-template.git template
           cp -r AsiaTvPlugin template/
-          
+
       - name: Build
         run: |
           cd template
           echo "include ':AsiaTvPlugin'" >> settings.gradle
+          chmod +x gradlew
           ./gradlew :AsiaTvPlugin:assembleRelease
-          
+
       - name: Copy output
         run: |
           mkdir -p builds
           find template -name "*.cs3" -exec cp {} builds/ \;
-          
+
       - name: Update plugins.json
         run: |
+          SIZE=$(wc -c < builds/AsiaTv.cs3 2>/dev/null || echo 20000)
+          cat > plugins.json << EOF
+          [
+            {
+              "name": "AsiaTv",
+              "internalName": "AsiaTv",
+              "url": "https://raw.githubusercontent.com/moumadabdrahim-dot/plugins/main/builds/AsiaTv.cs3",
+              "version": 1,
+              "language": "ar",
+              "fileSize": $SIZE,
+              "status": 1,
+              "iconUrl": "https://as1tv.com/wp-content/uploads/2021/09/cropped-asiadrama-270x270.png",
+              "authors": ["moumadabdrahim"],
+              "tvTypes": ["AsianDrama", "Movie", "TvSeries"],
+              "repositoryUrl": "https://github.com/moumadabdrahim-dot/plugins"
+            }
+          ]
+          EOF
+
+      - name: Push builds
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git add builds/ plugins.json
+          git commit -m "Build plugins" || echo "Nothing to commit"
+          git push        run: |
           cat > plugins.json << 'EOF'
           [
             {
