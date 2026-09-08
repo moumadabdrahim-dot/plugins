@@ -32,10 +32,11 @@ jobs:
         run: |
           git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/recloudstream/TestPlugins.git template
 
-      - name: Fix Kotlin version in template
+      - name: Fix Kotlin and Gradle plugin versions
         run: |
           sed -i 's/kotlin-gradle-plugin:2.1.0/kotlin-gradle-plugin:2.4.0/' template/build.gradle.kts
-          grep "kotlin-gradle-plugin" template/build.gradle.kts
+          sed -i 's#com.github.recloudstream:gradle:-SNAPSHOT#com.github.recloudstream:gradle:32895aedb6366f5075cb99bbd2e6ce0a7cac325d#' template/build.gradle.kts
+          grep "kotlin-gradle-plugin\|recloudstream:gradle" template/build.gradle.kts
 
       - name: Copy plugin to template
         run: |
