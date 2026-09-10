@@ -1,31 +1,92 @@
+@file:OptIn(com.lagradost.cloudstream3.InternalAPI::class)
+
 package com.oscartv
 
+import com.lagradost.cloudstream3.utils.AppUtils.parseJson
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal enum class OscarItemType(val key: String) {
+internal enum class OscarItemType(
+    val key: String,
+    val legacyKey: String = key,
+) {
     Anime("anime"),
     Movie("movie"),
     Series("series"),
-    AnimeEpisode("anime-episode"),
-    SeriesEpisode("series-episode"),
+    AnimeEpisode("anime_episode", "anime-episode"),
+    SeriesEpisode("series_episode", "series-episode");
+
+    companion object {
+        fun fromKey(value: String?): OscarItemType? {
+            val key = value?.trim() ?: return null
+            return entries.firstOrNull { it.key == key || it.legacyKey == key }
+        }
+    }
+}
+
+internal data class OscarItemData(
+    val type: String,
+    val id: Int,
+) {
+    fun toItemId(): OscarItemId? {
+        return OscarItemType.fromKey(type)?.let { OscarItemId(it, id) }
+    }
+
+    companion object {
+        fun parse(value: String): OscarItemData? {
+            val normalized = value.trim()
+            runCatching { parseJson<OscarItemData>(normalized, OscarItemData::class) }
+                .getOrNull()
+                ?.takeIf { OscarItemType.fromKey(it.type) != null }
+                ?.let { return it }
+
+            val match = LEGACY_ITEM_PATTERN.matchEntire(normalized) ?: return null
+            val type = OscarItemType.fromKey(match.groupValues[1]) ?: return null
+            return match.groupValues[2].toIntOrNull()?.let {
+                OscarItemData(type.key, it)
+            }
+        }
+    }
 }
 
 internal data class OscarItemId(
     val type: OscarItemType,
     val id: Int,
 ) {
-    fun asData(): String = "oscar://${type.key}/$id"
+    fun asData(): String = OscarItemData(type.key, id).toJson()
 
     companion object {
-        private val pattern = Regex("^oscar://(anime|movie|series|anime-episode|series-episode)/(\\d+)$")
-
         fun parse(value: String): OscarItemId? {
-            val match = pattern.matchEntire(value.trim()) ?: return null
-            val type = OscarItemType.entries.firstOrNull { it.key == match.groupValues[1] } ?: return null
-            return match.groupValues[2].toIntOrNull()?.let { OscarItemId(type, it) }
+            return OscarItemData.parse(value)?.toItemId()
         }
     }
+}
+
+private val LEGACY_ITEM_PATTERN =
+    Regex("^oscar://(anime|movie|series|anime-episode|series-episode)/(\\d+)$")
+
+internal data class OscarRetryResult<T>(
+    val value: T?,
+    val attempts: Int,
+)
+
+internal suspend fun <T> retryOscarPage(
+    maxAttempts: Int = 2,
+    fetch: suspend () -> T?,
+): OscarRetryResult<T> {
+    val attemptsLimit = maxAttempts.coerceAtLeast(1)
+    var attempts = 0
+    while (attempts < attemptsLimit) {
+        attempts++
+        val value = fetch()
+        if (value != null) return OscarRetryResult(value, attempts)
+    }
+    return OscarRetryResult(null, attempts)
+}
+
+internal fun <T> aggregateOscarPages(pages: Map<Int, List<T>>): List<T> {
+    return pages.toSortedMap().values.flatten()
 }
 
 internal data class OscarPagination(
@@ -247,7 +308,8 @@ internal fun JSONObject.optIntOrNull(name: String): Int? {
     val value = opt(name)
     return when (value) {
         is Number -> value.toInt()
-        else -> value?.toString()?.trim()?.toIntOrNull()
+        null -> null
+        else -> value.toString().trim().toIntOrNull()
     }
 }
 
@@ -256,7 +318,8 @@ internal fun JSONObject.optDoubleOrNull(name: String): Double? {
     val value = opt(name)
     return when (value) {
         is Number -> value.toDouble()
-        else -> value?.toString()?.trim()?.toDoubleOrNull()
+        null -> null
+        else -> value.toString().trim().toDoubleOrNull()
     }
 }
 

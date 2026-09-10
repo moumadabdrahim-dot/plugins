@@ -1,18 +1,36 @@
 package com.oscartv
 
+import kotlinx.coroutines.runBlocking
+import kotlin.test.assertNotEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import org.json.JSONObject
 import org.junit.Test
 
 class OscarModelsTest {
     @Test
-    fun itemNamespacesDoNotCollide() {
-        assertEquals("oscar://anime/46", OscarItemId(OscarItemType.Anime, 46).asData())
-        assertEquals("oscar://series/46", OscarItemId(OscarItemType.Series, 46).asData())
+    fun itemDataUsesJsonAndReadsLegacyValues() {
+        val animeData = OscarItemId(OscarItemType.Anime, 46).asData()
+        assertTrue(animeData.trimStart().startsWith("{"))
+        assertEquals(OscarItemData("anime", 46), OscarItemData.parse(animeData))
         assertEquals(
             OscarItemId(OscarItemType.Anime, 46),
             OscarItemId.parse("oscar://anime/46"),
         )
+        assertEquals(
+            OscarItemId(OscarItemType.AnimeEpisode, 8609),
+            OscarItemId.parse("oscar://anime-episode/8609"),
+        )
+    }
+
+    @Test
+    fun itemNamespacesDoNotCollide() {
+        val anime = OscarItemId(OscarItemType.Anime, 46).asData()
+        val series = OscarItemId(OscarItemType.Series, 46).asData()
+        assertNotEquals(anime, series)
+        assertEquals(OscarItemId(OscarItemType.Anime, 46), OscarItemId.parse(anime))
+        assertEquals(OscarItemId(OscarItemType.Series, 46), OscarItemId.parse(series))
     }
 
     @Test
@@ -30,5 +48,42 @@ class OscarModelsTest {
             JSONObject("{\"page\":1,\"limit\":100,\"total\":1177,\"total_pages\":12}"),
         )
         assertEquals(12, pagination?.pageCount())
+    }
+
+    @Test
+    fun pageAggregationOrdersPagesAndKeepsOtherPagesAfterFailure() {
+        val pages = mapOf(
+            3 to listOf("page3"),
+            1 to listOf("page1-a", "page1-b"),
+            4 to listOf("page4"),
+            // Page 2 is intentionally absent, representing a failed page fetch.
+        )
+        assertEquals(
+            listOf("page1-a", "page1-b", "page3", "page4"),
+            aggregateOscarPages(pages),
+        )
+    }
+
+    @Test
+    fun pageRetryCanRecoverOnce() = runBlocking {
+        var attempts = 0
+        val result = retryOscarPage(maxAttempts = 2) {
+            attempts++
+            if (attempts == 2) "ok" else null
+        }
+        assertEquals("ok", result.value)
+        assertEquals(2, result.attempts)
+    }
+
+    @Test
+    fun pageRetryTerminatesAfterTheConfiguredAttempts() = runBlocking {
+        var attempts = 0
+        val result = retryOscarPage<String>(maxAttempts = 2) {
+            attempts++
+            null
+        }
+        assertNull(result.value)
+        assertEquals(2, result.attempts)
+        assertEquals(2, attempts)
     }
 }

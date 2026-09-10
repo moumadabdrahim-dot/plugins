@@ -1,11 +1,14 @@
 package com.oscartv
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.supervisorScope
 import org.json.JSONObject
 
 class OscarTVPlugin : MainAPI() {
@@ -24,11 +27,9 @@ class OscarTVPlugin : MainAPI() {
 
     private val api = OscarApiClient { mainUrl }
 
-    override val mainPage = mainPageOf(
-        "oscar://main/anime" to "أنمي OscarTV",
-        "oscar://main/movies" to "أفلام OscarTV",
-        "oscar://main/series" to "مسلسلات OscarTV",
-    )
+    // One provider page builds the three ordered HomePageList sections below.
+    private val homePage = "oscar://home"
+    override val mainPage = mainPageOf(homePage to "OscarTV")
 
     override suspend fun search(query: String): List<SearchResponse> {
         val term = query.trim()
@@ -36,48 +37,103 @@ class OscarTVPlugin : MainAPI() {
 
         val results = linkedMapOf<String, SearchResponse>()
         api.animeSearch(term)?.items.orEmpty().mapNotNull(OscarCatalogItem::fromJson)
-            .forEach { item -> results[OscarItemId(OscarItemType.Anime, item.id).asData()] = item.toSearchResponse(OscarItemType.Anime) }
+            .forEach { item ->
+                val data = OscarItemId(OscarItemType.Anime, item.id).asData()
+                results[data] = item.toSearchResponse(OscarItemType.Anime)
+            }
         api.movieSearch(term)?.items.orEmpty().mapNotNull(OscarCatalogItem::fromJson)
-            .forEach { item -> results[OscarItemId(OscarItemType.Movie, item.id).asData()] = item.toSearchResponse(OscarItemType.Movie) }
+            .forEach { item ->
+                val data = OscarItemId(OscarItemType.Movie, item.id).asData()
+                results[data] = item.toSearchResponse(OscarItemType.Movie)
+            }
         api.seriesSearch(term)?.items.orEmpty().mapNotNull(OscarCatalogItem::fromJson)
-            .forEach { item -> results[OscarItemId(OscarItemType.Series, item.id).asData()] = item.toSearchResponse(OscarItemType.Series) }
+            .forEach { item ->
+                val data = OscarItemId(OscarItemType.Series, item.id).asData()
+                results[data] = item.toSearchResponse(OscarItemType.Series)
+            }
         return results.values.toList()
     }
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val section = request.data.substringAfterLast('/').lowercase()
-        val (path, query) = when (section) {
-            "anime" -> "/api/anime/" to mapOf("featured" to "1")
-            "movies" -> "/api/movies/" to mapOf("featured" to "1")
-            "series" -> "/api/series/" to emptyMap()
-            else -> return newHomePageResponse(request.name, emptyList(), false)
-        }
+    private data class OscarHomeSection(
+        val title: String,
+        val path: String,
+        val type: OscarItemType,
+    )
 
-        val pageData = api.listData(
-            path,
-            query + mapOf("page" to page.toString(), "limit" to "20"),
-        )
-        val responses = pageData?.items.orEmpty()
-            .mapNotNull(OscarCatalogItem::fromJson)
-            .map { item ->
-                val type = when (section) {
-                    "anime" -> OscarItemType.Anime
-                    "movies" -> OscarItemType.Movie
-                    else -> OscarItemType.Series
+    private val homeSections = listOf(
+        OscarHomeSection("أحدث الأفلام", "/api/movies/", OscarItemType.Movie),
+        OscarHomeSection("أحدث المسلسلات", "/api/series/", OscarItemType.Series),
+        OscarHomeSection("أحدث الأنمي", "/api/anime/", OscarItemType.Anime),
+    )
+
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val requestedPage = page.coerceAtLeast(1)
+        val homePageLists = supervisorScope {
+            homeSections.map { section ->
+                async {
+                    try {
+                        fetchHomeSection(section, requestedPage)
+                    } catch (error: Exception) {
+                        logOscar(
+                            "LOAD_MAPPING_FAILED section=${section.type.key} " +
+                                "exception=${error::class.java.simpleName} message=${error.safeLogMessageForLog()}",
+                        )
+                        null
+                    }
                 }
-                item.toSearchResponse(type)
+            }.awaitAll()
+        }.filterNotNull()
+
+        // awaitAll returns results in input order, so network completion cannot reorder sections.
+        return newHomePageResponse(homePageLists)
+    }
+
+    private suspend fun fetchHomeSection(
+        section: OscarHomeSection,
+        page: Int,
+    ): HomePageList? {
+        val pageData = api.listData(
+            section.path,
+            mapOf("page" to page.toString(), "limit" to "20"),
+        )
+        val responses = pageData?.items.orEmpty().mapNotNull { json ->
+            try {
+                OscarCatalogItem.fromJson(json)?.toSearchResponse(section.type)
+            } catch (error: Exception) {
+                logOscar(
+                    "LOAD_MAPPING_FAILED section=${section.type.key} reason=item_mapping " +
+                        "exception=${error::class.java.simpleName} message=${error.safeLogMessageForLog()}",
+                )
+                null
             }
-        val hasNext = pageData?.pagination?.let { page < it.pageCount() } ?: false
-        return newHomePageResponse(request.name, responses, hasNext)
+        }
+        if (responses.isEmpty()) return null
+        return HomePageList(section.title, responses)
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val item = OscarItemId.parse(url) ?: return null
-        return when (item.type) {
-            OscarItemType.Movie -> loadMovie(item)
-            OscarItemType.Series -> loadSeries(item)
-            OscarItemType.Anime -> loadAnime(item)
-            else -> null
+        val item = OscarItemData.parse(url)?.toItemId()
+        if (item == null) {
+            logOscar("LOAD_MAPPING_FAILED reason=invalid_item_data value=${url.safeLogValue()}")
+            return null
+        }
+
+        return try {
+            when (item.type) {
+                OscarItemType.Movie -> loadMovie(item)
+                OscarItemType.Series -> loadSeries(item)
+                OscarItemType.Anime -> loadAnime(item)
+                else -> {
+                    logOscar("LOAD_MAPPING_FAILED type=${item.type.key} id=${item.id} reason=not_loadable")
+                    null
+                }
+            }
+        } catch (error: Exception) {
+            logOscar(
+                "LOAD_MAPPING_FAILED type=${item.type.key} id=${item.id} " +
+                    "exception=${error::class.java.simpleName} message=${error.safeLogMessageForLog()}",
+            )
+            null
         }
     }
 
@@ -123,8 +179,17 @@ class OscarTVPlugin : MainAPI() {
     }
 
     private suspend fun loadMovie(item: OscarItemId): LoadResponse? {
-        val details = api.objectData("/api/movies/show.php", mapOf("id" to item.id.toString()))
-            ?.let(OscarMediaDetails::fromJson) ?: return null
+        val rawDetails = api.objectData("/api/movies/show.php", mapOf("id" to item.id.toString()))
+        if (rawDetails == null) {
+            logOscar("DETAIL_FAILED movie id=${item.id}")
+            return null
+        }
+        val details = OscarMediaDetails.fromJson(rawDetails)
+        if (details == null) {
+            logOscar("DETAIL_FAILED movie id=${item.id} reason=data_mapping")
+            return null
+        }
+
         return newMovieLoadResponse(details.title, item.asData(), TvType.Movie, item.asData()) {
             posterUrl = resolveOscarImage(details.poster)
             backgroundPosterUrl = resolveOscarImage(details.banner)
@@ -138,24 +203,39 @@ class OscarTVPlugin : MainAPI() {
     }
 
     private suspend fun loadSeries(item: OscarItemId): LoadResponse? {
-        val details = api.objectData("/api/series/show.php", mapOf("id" to item.id.toString()))
-            ?.let(OscarMediaDetails::fromJson) ?: return null
+        val rawDetails = api.objectData("/api/series/show.php", mapOf("id" to item.id.toString()))
+        if (rawDetails == null) {
+            logOscar("DETAIL_FAILED series id=${item.id}")
+            return null
+        }
+        val details = OscarMediaDetails.fromJson(rawDetails)
+        if (details == null) {
+            logOscar("DETAIL_FAILED series id=${item.id} reason=data_mapping")
+            return null
+        }
 
-        val seasons = api.listData("/api/seasons/", mapOf("series_id" to item.id.toString()))
-            ?.items.orEmpty().mapNotNull(OscarSeason::fromJson)
-            .ifEmpty { details.seasons }
+        val seasonsFromEndpoint = api.listData(
+            "/api/seasons/",
+            mapOf("series_id" to item.id.toString()),
+        )?.items.orEmpty().mapNotNull(OscarSeason::fromJson)
+        val seasons = (seasonsFromEndpoint.ifEmpty { details.seasons })
             .sortedBy { it.seasonNumber }
+        if (seasons.isEmpty()) {
+            logOscar("LOAD_MAPPING_FAILED type=series id=${item.id} reason=no_seasons")
+        }
 
-        val episodes = seasons.flatMap { season ->
-            api.seriesEpisodes(season.id).mapNotNull { episode ->
+        val episodes = api.seriesEpisodesForSeasons(seasons.map { it.id })
+            .mapNotNull { episode ->
                 episode.toCloudStreamEpisode(
                     type = OscarItemType.SeriesEpisode,
-                    fallbackSeason = season.seasonNumber,
+                    fallbackSeason = seasons.firstOrNull { it.id == episode.seasonId }?.seasonNumber
+                        ?: episode.seasonNumber ?: 1,
                     fallbackPoster = details.poster,
                 )
             }
-        }.distinctBy { it.data }
-            .sortedWith(compareBy<Episode> { it.season ?: Int.MAX_VALUE }.thenBy { it.episode ?: Int.MAX_VALUE })
+            .distinctBy { it.data }
+            .sortedWith(compareBy<Episode> { it.season ?: Int.MAX_VALUE }
+                .thenBy { it.episode ?: Int.MAX_VALUE })
 
         return newTvSeriesLoadResponse(details.title, item.asData(), TvType.TvSeries, episodes) {
             posterUrl = resolveOscarImage(details.poster)
@@ -171,22 +251,34 @@ class OscarTVPlugin : MainAPI() {
     }
 
     private suspend fun loadAnime(item: OscarItemId): LoadResponse? {
-        val details = api.objectData("/api/anime/show.php", mapOf("id" to item.id.toString()))
-            ?.let(OscarMediaDetails::fromJson) ?: return null
-        val seasons = details.seasons.sortedBy { it.seasonNumber }
+        val rawDetails = api.objectData("/api/anime/show.php", mapOf("id" to item.id.toString()))
+        if (rawDetails == null) {
+            logOscar("DETAIL_FAILED anime id=${item.id}")
+            return null
+        }
+        val details = OscarMediaDetails.fromJson(rawDetails)
+        if (details == null) {
+            logOscar("DETAIL_FAILED anime id=${item.id} reason=data_mapping")
+            return null
+        }
 
-        // Only episode list pages are fetched here. Episode detail, including watch
-        // links, is deliberately deferred to loadLinks for the selected episode.
-        val episodes = seasons.flatMap { season ->
-            api.animeEpisodes(season.id).mapNotNull { episode ->
+        val seasons = details.seasons.sortedBy { it.seasonNumber }
+        if (seasons.isEmpty()) {
+            logOscar("LOAD_MAPPING_FAILED type=anime id=${item.id} reason=no_seasons")
+        }
+
+        val episodes = api.animeEpisodesForSeasons(seasons.map { it.id })
+            .mapNotNull { episode ->
                 episode.toCloudStreamEpisode(
                     type = OscarItemType.AnimeEpisode,
-                    fallbackSeason = season.seasonNumber,
+                    fallbackSeason = seasons.firstOrNull { it.id == episode.seasonId }?.seasonNumber
+                        ?: episode.seasonNumber ?: 1,
                     fallbackPoster = details.poster,
                 )
             }
-        }.distinctBy { it.data }
-            .sortedWith(compareBy<Episode> { it.season ?: Int.MAX_VALUE }.thenBy { it.episode ?: Int.MAX_VALUE })
+            .distinctBy { it.data }
+            .sortedWith(compareBy<Episode> { it.season ?: Int.MAX_VALUE }
+                .thenBy { it.episode ?: Int.MAX_VALUE })
 
         return newAnimeLoadResponse(details.title, item.asData(), TvType.Anime) {
             posterUrl = resolveOscarImage(details.poster)
@@ -206,18 +298,18 @@ class OscarTVPlugin : MainAPI() {
         type: OscarItemType,
         fallbackSeason: Int,
         fallbackPoster: String?,
-    ): Episode? {
+    ): Episode {
         val season = seasonNumber ?: fallbackSeason
         return this@OscarTVPlugin.newEpisode(
             url = OscarItemId(type, id).asData(),
             initializer = {
-            name = episodeName(episodeNumber, title)
-            episode = episodeNumber
-            this.season = season
-            posterUrl = resolveOscarImage(thumbnail ?: poster ?: fallbackPoster)
-            runTime = duration
-            description = this@toCloudStreamEpisode.description
-            addDate(airDate)
+                name = episodeName(episodeNumber, title)
+                episode = episodeNumber
+                this.season = season
+                posterUrl = resolveOscarImage(thumbnail ?: poster ?: fallbackPoster)
+                runTime = duration
+                description = this@toCloudStreamEpisode.description
+                addDate(airDate)
             },
             fix = false,
         )
@@ -239,10 +331,17 @@ class OscarTVPlugin : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        val item = OscarItemId.parse(data) ?: return false
+        val item = OscarItemData.parse(data)?.toItemId()
+        if (item == null) {
+            logOscar("LOAD_MAPPING_FAILED stage=loadLinks reason=invalid_item_data value=${data.safeLogValue()}")
+            return false
+        }
+
         val links = when (item.type) {
-            OscarItemType.Movie -> api.objectData("/api/movies/show.php", mapOf("id" to item.id.toString()))
-                ?.watchLinks().orEmpty()
+            OscarItemType.Movie -> api.objectData(
+                "/api/movies/show.php",
+                mapOf("id" to item.id.toString()),
+            )?.watchLinks().orEmpty()
 
             OscarItemType.SeriesEpisode -> seriesEpisodeLinks(item.id)
 
@@ -259,6 +358,9 @@ class OscarTVPlugin : MainAPI() {
         var found = false
         links.forEach { link ->
             if (emitWatchLink(link, subtitleCallback, callback)) found = true
+        }
+        if (!found) {
+            logOscar("LOAD_MAPPING_FAILED stage=loadLinks type=${item.type.key} id=${item.id} reason=no_usable_links")
         }
         return found
     }
@@ -297,7 +399,7 @@ class OscarTVPlugin : MainAPI() {
                     ) {
                         referer = "$mainUrl/"
                         this.quality = quality
-                    }
+                    },
                 )
                 true
             } else {
@@ -308,8 +410,11 @@ class OscarTVPlugin : MainAPI() {
                 }
                 emitted
             }
-        } catch (_: Exception) {
-            // A bad server must not hide the remaining qualities/servers.
+        } catch (error: Exception) {
+            logOscar(
+                "LOAD_MAPPING_FAILED stage=loadLinks server=${link.serverName.safeLogValue()} " +
+                    "exception=${error::class.java.simpleName} message=${error.safeLogMessageForLog()}",
+            )
             false
         }
     }
@@ -329,4 +434,12 @@ private fun String?.toShowStatus(): ShowStatus? = when (this?.lowercase()) {
     "completed", "released" -> ShowStatus.Completed
     "ongoing", "airing" -> ShowStatus.Ongoing
     else -> null
+}
+
+private fun Throwable.safeLogMessageForLog(): String {
+    return message.orEmpty().replace(Regex("\\s+"), " ").take(200)
+}
+
+private fun String?.safeLogValue(): String {
+    return this.orEmpty().replace(Regex("\\s+"), " ").take(160)
 }
