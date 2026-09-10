@@ -33,10 +33,12 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/recloudstream/TestPlugins.git template
 
-      - name: Copy AsiaTv plugin
+      - name: Copy plugin modules
         run: |
-          rm -rf template/AsiaTvPlugin
-          cp -r src/AsiaTvPlugin template/AsiaTvPlugin
+          for plugin in AsiaTvPlugin OscarTVPlugin; do
+            rm -rf "template/$plugin"
+            cp -r "src/$plugin" "template/$plugin"
+          done
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -72,11 +74,11 @@ jobs:
           path.write_text(text.replace(old, new))
           PY
 
-      - name: Build AsiaTv
+      - name: Build plugins
         working-directory: template
         run: |
           chmod +x gradlew
-          ./gradlew :AsiaTvPlugin:make \
+          ./gradlew :AsiaTvPlugin:make :OscarTVPlugin:make \
             --no-daemon \
             --stacktrace \
             --refresh-dependencies
@@ -86,21 +88,23 @@ jobs:
           echo "Generated .cs3 files:"
           find template -type f -name "*.cs3" -print
 
-      - name: Publish AsiaTv.cs3
+      - name: Publish plugin builds
         run: |
-          rm -f "$GITHUB_WORKSPACE/builds/AsiaTv.cs3"
+          for plugin in AsiaTv OscarTV; do
+            rm -f "$GITHUB_WORKSPACE/builds/$plugin.cs3"
 
-          CS3_FILE="$(find template/AsiaTvPlugin -type f -name "*.cs3" | head -n 1)"
+            CS3_FILE="$(find "template/${plugin}Plugin" -type f -name "*.cs3" | head -n 1)"
 
-          if [ -z "$CS3_FILE" ]; then
-            echo "ERROR: No .cs3 file was generated"
-            exit 1
-          fi
+            if [ -z "$CS3_FILE" ]; then
+              echo "ERROR: No .cs3 file was generated for $plugin"
+              exit 1
+            fi
 
-          cp "$CS3_FILE" "$GITHUB_WORKSPACE/builds/AsiaTv.cs3"
+            cp "$CS3_FILE" "$GITHUB_WORKSPACE/builds/$plugin.cs3"
+          done
 
           echo "Published:"
-          ls -lh "$GITHUB_WORKSPACE/builds/AsiaTv.cs3"
+          ls -lh "$GITHUB_WORKSPACE/builds/AsiaTv.cs3" "$GITHUB_WORKSPACE/builds/OscarTV.cs3"
 
       - name: Push builds branch
         working-directory: builds
@@ -108,7 +112,7 @@ jobs:
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
 
-          git add AsiaTv.cs3
+          git add AsiaTv.cs3 OscarTV.cs3
 
           if git diff --cached --quiet; then
             echo "No changes to commit"

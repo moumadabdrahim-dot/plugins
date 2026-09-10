@@ -17,5 +17,24 @@
       "TvSeries"
     ],
     "repositoryUrl": "https://github.com/moumadabdrahim-dot/plugins"
+  },
+  {
+    "name": "OscarTV",
+    "internalName": "OscarTV",
+    "url": "https://raw.githubusercontent.com/moumadabdrahim-dot/plugins/builds/OscarTV.cs3",
+    "version": 1,
+    "apiVersion": 1,
+    "language": "ar",
+    "status": 1,
+    "authors": [
+      "moumadabdrahim"
+    ],
+    "tvTypes": [
+      "Anime",
+      "AnimeMovie",
+      "Movie",
+      "TvSeries"
+    ],
+    "repositoryUrl": "https://github.com/moumadabdrahim-dot/plugins"
   }
 ]
