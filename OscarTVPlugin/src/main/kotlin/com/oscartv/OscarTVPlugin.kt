@@ -355,9 +355,28 @@ class OscarTVPlugin : MainAPI() {
             else -> emptyList()
         }
 
+        val emittedKeys = mutableSetOf<String>()
+        fun emitUnique(link: ExtractorLink): Boolean {
+            val key = oscarMediaDedupKey(link.url, link.quality)
+            if (!emittedKeys.add(key)) return false
+
+            val host = link.url.toOscarHost().orEmpty().ifBlank { "<unknown>" }
+            val userAgent = link.headers.entries
+                .firstOrNull { (key) -> key.equals("User-Agent", ignoreCase = true) }
+                ?.value
+                .orEmpty()
+            logOscar("FINAL_MEDIA_FOUND host=$host type=${link.type.name}")
+            logOscar(
+                "MEDIA_LINK_EMIT host=$host quality=${link.quality} type=${link.type.name} " +
+                    "ua=${userAgent.safeLogValue()} referer=${!link.referer.isNullOrBlank()}",
+            )
+            callback(link)
+            return true
+        }
+
         var found = false
         links.forEach { link ->
-            if (emitWatchLink(link, subtitleCallback, callback)) found = true
+            if (emitWatchLink(link, subtitleCallback, ::emitUnique)) found = true
         }
         if (!found) {
             logOscar("LOAD_MAPPING_FAILED stage=loadLinks type=${item.type.key} id=${item.id} reason=no_usable_links")
@@ -377,38 +396,44 @@ class OscarTVPlugin : MainAPI() {
     private suspend fun emitWatchLink(
         link: OscarWatchLink,
         subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit,
+        emit: (ExtractorLink) -> Boolean,
     ): Boolean {
         val url = link.url?.trim().takeUnless { it.isNullOrBlank() } ?: return false
         val quality = parseOscarQuality(link.quality ?: url) ?: Qualities.Unknown.value
-        val direct = link.type?.equals("direct", true) == true || isDirectMedia(url)
 
         return try {
-            if (direct) {
-                val type = if (url.substringBefore('?').endsWith(".m3u8", true)) {
-                    ExtractorLinkType.M3U8
-                } else {
-                    ExtractorLinkType.VIDEO
+            when (link.playbackKind()) {
+                OscarPlaybackKind.WRAPPER -> {
+                    OscarSeriesMp4Resolver.resolve(link, subtitleCallback, emit)
                 }
-                callback(
-                    newExtractorLink(
-                        source = name,
-                        name = link.serverName?.takeIf { it.isNotBlank() } ?: name,
-                        url = url,
-                        type = type,
-                    ) {
-                        referer = "$mainUrl/"
-                        this.quality = quality
-                    },
-                )
-                true
-            } else {
-                var emitted = false
-                loadExtractor(url, "$mainUrl/", subtitleCallback) {
-                    emitted = true
-                    callback(it)
+
+                OscarPlaybackKind.DIRECT -> {
+                    val mediaType = url.toOscarMediaType()
+                    val extractorType = when (mediaType) {
+                        OscarMediaType.M3U8 -> ExtractorLinkType.M3U8
+                        OscarMediaType.VIDEO -> ExtractorLinkType.VIDEO
+                    }
+                    val headers = link.mediaHeaders()
+                    emit(
+                        newExtractorLink(
+                            source = name,
+                            name = link.serverName?.takeIf { it.isNotBlank() } ?: name,
+                            url = url,
+                            type = extractorType,
+                        ) {
+                            this.headers = headers
+                            this.quality = quality
+                        },
+                    )
                 }
-                emitted
+
+                OscarPlaybackKind.EXTRACTOR -> {
+                    var emitted = false
+                    loadExtractor(url, "$mainUrl/", subtitleCallback) {
+                        emitted = emit(it) || emitted
+                    }
+                    emitted
+                }
             }
         } catch (error: Exception) {
             logOscar(
@@ -419,11 +444,6 @@ class OscarTVPlugin : MainAPI() {
         }
     }
 
-    private fun isDirectMedia(url: String): Boolean {
-        val path = url.substringBefore('?').lowercase()
-        return path.endsWith(".mp4") || path.endsWith(".m3u8") ||
-            path.endsWith(".webm") || path.endsWith(".mkv")
-    }
 
     private fun JSONObject.watchLinks(): List<OscarWatchLink> {
         return optJSONArray("watch_links")?.objects().orEmpty().mapNotNull(OscarWatchLink::fromJson)
@@ -436,10 +456,10 @@ private fun String?.toShowStatus(): ShowStatus? = when (this?.lowercase()) {
     else -> null
 }
 
-private fun Throwable.safeLogMessageForLog(): String {
+internal fun Throwable.safeLogMessageForLog(): String {
     return message.orEmpty().replace(Regex("\\s+"), " ").take(200)
 }
 
-private fun String?.safeLogValue(): String {
+internal fun String?.safeLogValue(): String {
     return this.orEmpty().replace(Regex("\\s+"), " ").take(160)
 }

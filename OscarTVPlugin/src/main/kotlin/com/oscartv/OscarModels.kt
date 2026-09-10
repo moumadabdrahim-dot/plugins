@@ -4,6 +4,8 @@ package com.oscartv
 
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
+import java.net.URI
+import java.net.URLDecoder
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -278,7 +280,16 @@ internal data class OscarWatchLink(
     val url: String?,
     val quality: String?,
     val type: String?,
+    val deepLink: String? = null,
 ) {
+    fun mediaHeaders(): Map<String, String> {
+        val userAgent = deepLink
+            .toOscarPlaybackHints()
+            .userAgent
+            ?: OSCAR_DEFAULT_MEDIA_USER_AGENT
+        return mapOf("User-Agent" to userAgent)
+    }
+
     companion object {
         fun fromJson(json: JSONObject): OscarWatchLink? {
             val url = json.optStringOrNull("url") ?: return null
@@ -287,9 +298,65 @@ internal data class OscarWatchLink(
                 url = url,
                 quality = json.optStringOrNull("quality"),
                 type = json.optStringOrNull("type"),
+                deepLink = json.optStringOrNull("deep_link"),
             )
         }
     }
+}
+
+internal data class OscarPlaybackHints(
+    val userAgent: String? = null,
+)
+
+internal enum class OscarMediaType {
+    VIDEO,
+    M3U8,
+}
+
+internal const val OSCAR_DEFAULT_MEDIA_USER_AGENT = "TDMuaPlayer"
+
+internal fun String?.toOscarPlaybackHints(): OscarPlaybackHints {
+    val deepLink = this?.trim().orEmpty()
+    if (deepLink.isBlank()) return OscarPlaybackHints()
+
+    val query = runCatching {
+        URI(deepLink.replace(" ", "%20")).rawQuery.orEmpty()
+    }.getOrElse {
+        deepLink.substringAfter('?', "")
+    }
+    val params = query.split('&').mapNotNull { part ->
+        val separator = part.indexOf('=')
+        if (separator <= 0) return@mapNotNull null
+        val key = decodeOscarQueryValue(part.substring(0, separator)) ?: return@mapNotNull null
+        val value = decodeOscarQueryValue(part.substring(separator + 1)) ?: return@mapNotNull null
+        key to value
+    }.toMap()
+
+    return OscarPlaybackHints(
+        userAgent = params["ua"]?.trim()?.takeIf(::isReasonableOscarHeaderValue),
+    )
+}
+
+internal fun OscarWatchLink.mediaHost(): String? {
+    return url?.let { value ->
+        runCatching { URI(value).host?.lowercase() }.getOrNull()
+    }
+}
+
+internal fun String.toOscarMediaType(): OscarMediaType {
+    return if (substringBefore('?').endsWith(".m3u8", true)) {
+        OscarMediaType.M3U8
+    } else {
+        OscarMediaType.VIDEO
+    }
+}
+
+private fun decodeOscarQueryValue(value: String): String? {
+    return runCatching { URLDecoder.decode(value, "UTF-8") }.getOrNull()
+}
+
+private fun isReasonableOscarHeaderValue(value: String): Boolean {
+    return value.length in 1..200 && !value.contains('\r') && !value.contains('\n')
 }
 
 internal fun parseOscarQuality(value: String?): Int? {

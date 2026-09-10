@@ -86,4 +86,66 @@ class OscarModelsTest {
         assertEquals(2, result.attempts)
         assertEquals(2, attempts)
     }
+
+    @Test
+    fun watchLinkKeepsDeepLinkAndExtractsUserAgent() {
+        val link = OscarWatchLink.fromJson(
+            JSONObject(
+                """
+                {
+                  "url": "https://cdn.seriesmp4.com/video.mp4",
+                  "quality": "480p",
+                  "type": "direct",
+                  "deep_link": "tdmvideo://play?url=https://cdn.seriesmp4.com/video.mp4&ua=TDMuaPlayer"
+                }
+                """.trimIndent(),
+            ),
+        )
+        assertEquals("tdmvideo://play?url=https://cdn.seriesmp4.com/video.mp4&ua=TDMuaPlayer", link?.deepLink)
+        assertEquals("TDMuaPlayer", link?.mediaHeaders()?.get("User-Agent"))
+    }
+
+    @Test
+    fun deepLinkQueryValuesAreUrlDecoded() {
+        val hints = "tdmvideo://play?ua=TDMuaPlayer%2F1.0&title=One%20Piece Ep 001".toOscarPlaybackHints()
+        assertEquals("TDMuaPlayer/1.0", hints.userAgent)
+    }
+
+    @Test
+    fun nullDeepLinkUsesMediaUserAgentFallback() {
+        val link = OscarWatchLink(
+            serverName = "server",
+            url = "https://cdn.seriesmp4.com/video.mp4",
+            quality = "480p",
+            type = "direct",
+        )
+        assertEquals("TDMuaPlayer", link.mediaHeaders()["User-Agent"])
+    }
+
+    @Test
+    fun mediaHeadersNeverContainIronHeadersOrReferer() {
+        val link = OscarWatchLink(
+            serverName = "server",
+            url = "https://cdn.seriesmp4.com/video.mp4",
+            quality = "480p",
+            type = "direct",
+            deepLink = "tdmvideo://play?ua=TDMuaPlayer",
+        )
+        val headers = link.mediaHeaders()
+        assertTrue(headers.keys.none { it.startsWith("X-Iron-", ignoreCase = true) })
+        assertTrue(headers.keys.none { it.equals("Referer", ignoreCase = true) })
+    }
+
+    @Test
+    fun mediaHostAndTypeAreMappedSafely() {
+        val link = OscarWatchLink(
+            serverName = "server",
+            url = "https://cdn.seriesmp4.com/video.mp4?token=1",
+            quality = "480p",
+            type = "direct",
+        )
+        assertEquals("cdn.seriesmp4.com", link.mediaHost())
+        assertEquals(OscarMediaType.VIDEO, link.url!!.toOscarMediaType())
+        assertEquals(OscarMediaType.M3U8, "https://cdn.example/live.m3u8?token=1".toOscarMediaType())
+    }
 }

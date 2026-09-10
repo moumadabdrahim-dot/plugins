@@ -11,7 +11,7 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2")
 }
 
-version = 2
+version = 3
 
 cloudstream {
     description = "أفلام ومسلسلات وأنمي OscarTV"
