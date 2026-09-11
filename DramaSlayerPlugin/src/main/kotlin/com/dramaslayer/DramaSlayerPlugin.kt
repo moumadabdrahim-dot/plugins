@@ -7,7 +7,7 @@ class DramaSlayerPlugin : MainAPI() {
     override var mainUrl = DramaSlayerConfig.apiBase
     override var name = "Drama Slayer"
     override var lang = "ar"
-    override val hasMainPage = false
+    override val hasMainPage = true
     override val hasDownloadSupport = true
 
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
@@ -15,25 +15,45 @@ class DramaSlayerPlugin : MainAPI() {
     private val api = DramaSlayerApi(baseUrl = { mainUrl })
     private val linkResolver = DramaSlayerLinkResolver(api, name)
 
+    private val homePage = "dramaslayer://home"
+    override val mainPage = mainPageOf(homePage to "جميع الأعمال")
+
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val responses = try {
+            api.getAll(page)
+                .mapNotNull(::toSearchResponse)
+                .distinctBy { it.url }
+        } catch (error: Exception) {
+            logDramaSlayer(
+                "HOME_FAILED page=${page.coerceAtLeast(1)} " +
+                    "exception=${error::class.java.simpleName}",
+            )
+            emptyList()
+        }
+        return newHomePageResponse(request.name, responses)
+    }
+
     override suspend fun search(query: String): List<SearchResponse> {
         val term = query.trim()
         if (term.isBlank()) return emptyList()
-        return api.search(term).mapNotNull { item ->
-            val id = item.dramaId ?: return@mapNotNull null
-            val title = item.dramaName ?: item.alternativeTitles ?: return@mapNotNull null
-            val type = item.dramaType.toTvType()
-            if (type == TvType.Movie) {
-                newMovieSearchResponse(title, dramaUrl(id), TvType.Movie, fix = false) {
-                    posterUrl = item.posterUrl
-                    year = item.releaseDate?.toIntOrNull()
-                }
-            } else {
-                newTvSeriesSearchResponse(title, dramaUrl(id), TvType.TvSeries, fix = false) {
-                    posterUrl = item.posterUrl
-                    year = item.releaseDate?.toIntOrNull()
-                }
+        return api.search(term).mapNotNull(::toSearchResponse).distinctBy { it.url }
+    }
+
+    internal fun toSearchResponse(item: DramaItem): SearchResponse? {
+        val id = item.dramaId ?: return null
+        val title = item.dramaName ?: item.alternativeTitles ?: return null
+        val type = item.dramaType.toTvType()
+        return if (type == TvType.Movie) {
+            newMovieSearchResponse(title, dramaUrl(id), TvType.Movie, fix = false) {
+                posterUrl = item.posterUrl
+                year = item.releaseDate?.toIntOrNull()
             }
-        }.distinctBy { it.url }
+        } else {
+            newTvSeriesSearchResponse(title, dramaUrl(id), TvType.TvSeries, fix = false) {
+                posterUrl = item.posterUrl
+                year = item.releaseDate?.toIntOrNull()
+            }
+        }
     }
 
     override suspend fun load(url: String): LoadResponse? {

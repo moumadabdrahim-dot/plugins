@@ -18,6 +18,10 @@ internal fun logDramaSlayer(message: String) {
     Log.d(DRAMA_SLAYER_LOG_TAG, message)
 }
 
+internal fun dramaSlayerOffset(page: Int): Int {
+    return (page.coerceAtLeast(1) - 1) * DramaSlayerConfig.pageSize
+}
+
 internal class DramaSlayerApi(
     private val baseUrl: () -> String = { DramaSlayerConfig.apiBase },
     private val infProvider: DramaSlayerInfProvider = EmptyDramaSlayerInfProvider,
@@ -96,19 +100,20 @@ internal class DramaSlayerApi(
         }
     }
 
-    suspend fun search(query: String, page: Int = 1): List<DramaItem> {
-        val offset = (page.coerceAtLeast(1) - 1) * DramaSlayerConfig.pageSize
+    private suspend fun publishedDrama(page: Int, keyword: String? = null): List<DramaItem> {
+        val offset = dramaSlayerOffset(page)
         val requestJson = org.json.JSONObject()
             .put("list_type", "all")
             .put("_offset", offset)
             .put("_limit", DramaSlayerConfig.pageSize)
-            .put("keyword", query.trim())
-            .toString()
+            .apply {
+                keyword?.trim()?.takeIf { it.isNotBlank() }?.let { put("keyword", it) }
+            }
         val payload = getPayload(
             withQuery(
                 endpoint("drama-app-api/get-all-published-drama"),
                 mapOf(
-                    "json" to requestJson,
+                    "json" to requestJson.toString(),
                     "offset" to offset.toString(),
                     "list_type" to "all",
                     "limit" to DramaSlayerConfig.pageSize.toString(),
@@ -117,6 +122,14 @@ internal class DramaSlayerApi(
             cacheTime = 5,
         ) ?: return emptyList()
         return parseDramaItems(payload.toString()).distinctBy { it.dramaId }
+    }
+
+    suspend fun search(query: String, page: Int = 1): List<DramaItem> {
+        return publishedDrama(page, query)
+    }
+
+    suspend fun getAll(page: Int = 1): List<DramaItem> {
+        return publishedDrama(page)
     }
 
     suspend fun details(dramaId: String): DramaDetails? {

@@ -9,9 +9,14 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
 }
 
-version = 1
+configurations.named("testImplementation") {
+    extendsFrom(configurations.getByName("compileOnly"))
+}
+
+version = 2
 
 cloudstream {
     description = "مسلسلات وأفلام Drama Slayer"

@@ -1,11 +1,39 @@
 package com.dramaslayer
 
+import com.lagradost.cloudstream3.*
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import org.junit.Test
 
 class DramaSlayerModelsTest {
+    @Test
+    fun exposesOneHomePage() {
+        val plugin = DramaSlayerPlugin()
+
+        assertTrue(plugin.hasMainPage)
+        assertTrue(plugin.mainPage.isNotEmpty())
+    }
+
+    @Test
+    fun homePaginationUsesTwentyOneItemPages() {
+        assertEquals(0, dramaSlayerOffset(1))
+        assertEquals(21, dramaSlayerOffset(2))
+    }
+
+    @Test
+    fun homeMappingUsesMovieAndTvSeriesResponses() {
+        val plugin = DramaSlayerPlugin()
+
+        val movie = assertNotNull(plugin.toSearchResponse(sampleItem("Movie")))
+        assertTrue(movie is MovieSearchResponse)
+        assertEquals(TvType.Movie, movie.type)
+
+        val series = assertNotNull(plugin.toSearchResponse(sampleItem("Series")))
+        assertTrue(series is TvSeriesSearchResponse)
+        assertEquals(TvType.TvSeries, series.type)
+    }
+
     @Test
     fun episodeDataRoundTripsOnlyStableIds() {
         val original = EpisodeData("8", "92")
@@ -55,5 +83,19 @@ class DramaSlayerModelsTest {
         assertEquals(2, episodes.size)
         assertEquals("92", episodes.first().episodeId)
         assertEquals("CDN", episodes.first().episodeUrls.first().serverName)
+    }
+
+    private fun sampleItem(type: String): DramaItem {
+        return DramaItem(
+            dramaId = "8",
+            dramaName = "49 Days",
+            alternativeTitles = null,
+            dramaType = type,
+            country = "كوري",
+            releaseDate = "2011",
+            genres = null,
+            status = null,
+            posterUrl = "https://img.example/49.jpg",
+        )
     }
 }
