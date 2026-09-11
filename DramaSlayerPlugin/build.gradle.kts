@@ -16,7 +16,7 @@ configurations.named("testImplementation") {
     extendsFrom(configurations.getByName("compileOnly"))
 }
 
-version = 2
+version = 3
 
 cloudstream {
     description = "مسلسلات وأفلام Drama Slayer"

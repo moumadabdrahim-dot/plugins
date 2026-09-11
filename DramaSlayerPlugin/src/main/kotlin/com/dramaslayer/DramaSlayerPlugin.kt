@@ -3,7 +3,26 @@ package com.dramaslayer
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 
-class DramaSlayerPlugin : MainAPI() {
+internal data class DramaHomeSection(
+    val title: String,
+    val listType: String,
+)
+
+internal val dramaHomeSections = listOf(
+    DramaHomeSection("أحدث المسلسلات", "latest_series"),
+    DramaHomeSection("أحدث الأفلام", "latest_movie"),
+)
+
+private fun dramaHomePath(listType: String): String = "dramaslayer://home/$listType"
+
+class DramaSlayerPlugin private constructor(
+    private val apiOverride: DramaSlayerApi?,
+    @Suppress("UNUSED_PARAMETER") private val injected: Unit,
+) : MainAPI() {
+    constructor() : this(null, Unit)
+
+    internal constructor(api: DramaSlayerApi) : this(api, Unit)
+
     override var mainUrl = DramaSlayerConfig.apiBase
     override var name = "Drama Slayer"
     override var lang = "ar"
@@ -12,24 +31,31 @@ class DramaSlayerPlugin : MainAPI() {
 
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
-    private val api = DramaSlayerApi(baseUrl = { mainUrl })
+    private val api = apiOverride ?: DramaSlayerApi(baseUrl = { mainUrl })
     private val linkResolver = DramaSlayerLinkResolver(api, name)
 
-    private val homePage = "dramaslayer://home"
-    override val mainPage = mainPageOf(homePage to "جميع الأعمال")
+    override val mainPage = mainPageOf(
+        *dramaHomeSections.map { dramaHomePath(it.listType) to it.title }.toTypedArray(),
+    )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val section = dramaHomeSections.firstOrNull { dramaHomePath(it.listType) == request.data }
+            ?: return newHomePageResponse(request.name, emptyList())
         val responses = try {
-            api.getAll(page)
+            api.getPublishedDrama(section.listType, page)
                 .mapNotNull(::toSearchResponse)
                 .distinctBy { it.url }
         } catch (error: Exception) {
             logDramaSlayer(
-                "HOME_FAILED page=${page.coerceAtLeast(1)} " +
+                "HOME_REQUEST_FAILED list_type=${section.listType} page=${page.coerceAtLeast(1)} " +
                     "exception=${error::class.java.simpleName}",
             )
             emptyList()
         }
+        logDramaSlayer(
+            "HOME_MAPPING_OK list_type=${section.listType} page=${page.coerceAtLeast(1)} " +
+                "count=${responses.size}",
+        )
         return newHomePageResponse(request.name, responses)
     }
 
@@ -58,17 +84,33 @@ class DramaSlayerPlugin : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val dramaId = parseDramaId(url) ?: return null
-        val details = api.details(dramaId) ?: return null
+        logDramaSlayer("LOAD_START drama=$dramaId")
+        val details = runCatching { api.details(dramaId) }.getOrElse {
+            logDramaSlayer("LOAD_DETAILS_FAILED drama=$dramaId exception=${it::class.java.simpleName}")
+            return null
+        } ?: run {
+            logDramaSlayer("LOAD_DETAILS_FAILED drama=$dramaId reason=empty")
+            return null
+        }
         val title = details.dramaName ?: details.alternativeTitles ?: "Drama Slayer"
         val poster = details.posterUrl
         val tags = details.genres?.split(',')?.map { it.trim() }?.filter { it.isNotBlank() }.orEmpty()
-        val episodes = api.episodes(dramaId)
+        val episodes = runCatching { api.episodes(dramaId) }.getOrElse {
+            logDramaSlayer("LOAD_EPISODES_FAILED drama=$dramaId exception=${it::class.java.simpleName}")
+            return null
+        }
             .filter { !it.episodeId.isNullOrBlank() }
             .sortedWith(compareBy({ it.episodeNumber?.toIntOrNull() ?: Int.MAX_VALUE }, { it.episodeId }))
 
         if (details.dramaType.isMovieType()) {
-            val movieData = episodes.singleOrNull()?.episodeId?.let { EpisodeData(dramaId, it).asData() }
-                ?: dramaUrl(dramaId)
+            val movieEpisodeId = episodes.firstNotNullOfOrNull { episode ->
+                episode.episodeId?.takeIf { it.isNotBlank() }
+            } ?: run {
+                logDramaSlayer("LOAD_MAPPING_FAILED drama=$dramaId type=Movie reason=no_movie_episode")
+                return null
+            }
+            val movieData = EpisodeData(dramaId, movieEpisodeId).asData()
+            logDramaSlayer("LOAD_MAPPING_OK drama=$dramaId type=Movie episode=$movieEpisodeId")
             return newMovieLoadResponse(title, dramaUrl(dramaId), TvType.Movie, movieData) {
                 posterUrl = poster
                 year = details.releaseDate?.toIntOrNull()
@@ -90,6 +132,7 @@ class DramaSlayerPlugin : MainAPI() {
                 fix = false,
             )
         }
+        logDramaSlayer("LOAD_MAPPING_OK drama=$dramaId type=TvSeries episodes=${cloudStreamEpisodes.size}")
         return newTvSeriesLoadResponse(title, dramaUrl(dramaId), TvType.TvSeries, cloudStreamEpisodes) {
             posterUrl = poster
             year = details.releaseDate?.toIntOrNull()
@@ -114,12 +157,12 @@ class DramaSlayerPlugin : MainAPI() {
     }
 
     private fun dramaUrl(id: String): String = "dramaslayer://drama/${id.trim()}"
+}
 
-    private fun parseDramaId(url: String): String? {
-        if (!url.startsWith("dramaslayer://drama/", true)) return null
-        return url.substringAfterLast('/').trim().takeIf {
-            it.isNotBlank() && it.all { char -> char.isLetterOrDigit() || char == '-' || char == '_' }
-        }
+internal fun parseDramaId(url: String): String? {
+    if (!url.startsWith("dramaslayer://drama/", true)) return null
+    return url.substringAfterLast('/').trim().takeIf {
+        it.isNotBlank() && it.all { char -> char.isLetterOrDigit() || char == '-' || char == '_' }
     }
 }
 

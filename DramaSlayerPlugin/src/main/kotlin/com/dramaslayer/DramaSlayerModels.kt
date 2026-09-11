@@ -179,8 +179,46 @@ internal fun parseDramaItems(payload: String): List<DramaItem> {
 }
 
 internal fun parseDramaDetails(payload: String): DramaDetails? {
-    val json = parseJsonValue(payload) as? JSONObject ?: return null
-    return DramaDetails.fromJson(json)
+    return parseDramaDetailsValue(parseJsonValue(payload))
+}
+
+internal fun parseDramaDetailsValue(value: Any?): DramaDetails? {
+    return when (value) {
+        is JSONObject -> {
+            if (value.has("drama_id") || value.has("drama_name") || value.has("drama_cover_image_url")) {
+                DramaDetails.fromJson(value)
+            } else {
+                listOf("data", "drama", "result")
+                    .asSequence()
+                    .mapNotNull { key -> parseDramaDetailsValue(value.opt(key)) }
+                    .firstOrNull()
+            }
+        }
+
+        is JSONArray -> {
+            (0 until value.length())
+                .asSequence()
+                .mapNotNull { index -> parseDramaDetailsValue(value.opt(index)) }
+                .firstOrNull()
+        }
+
+        is String -> {
+            val parsed = parseJsonValue(value)
+            if (parsed is String && parsed == value) null else parseDramaDetailsValue(parsed)
+        }
+
+        else -> null
+    }
+}
+
+internal fun dramaSlayerValueType(value: Any?): String {
+    return when (value) {
+        is JSONObject -> "JSONObject"
+        is JSONArray -> "JSONArray"
+        is String -> "String"
+        null -> "null"
+        else -> value::class.java.simpleName
+    }
 }
 
 internal fun parseEpisodes(payload: String): List<DramaEpisode> {

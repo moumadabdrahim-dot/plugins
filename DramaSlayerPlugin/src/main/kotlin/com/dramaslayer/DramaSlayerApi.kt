@@ -15,14 +15,22 @@ internal object DramaSlayerConfig {
 private const val DRAMA_SLAYER_LOG_TAG = "DramaSlayer"
 
 internal fun logDramaSlayer(message: String) {
-    Log.d(DRAMA_SLAYER_LOG_TAG, message)
+    runCatching { Log.d(DRAMA_SLAYER_LOG_TAG, message) }
 }
 
 internal fun dramaSlayerOffset(page: Int): Int {
     return (page.coerceAtLeast(1) - 1) * DramaSlayerConfig.pageSize
 }
 
-internal class DramaSlayerApi(
+private data class DramaRequestContext(
+    val operation: String,
+    val dramaId: String? = null,
+    val episodeId: String? = null,
+    val page: Int? = null,
+    val listType: String? = null,
+)
+
+internal open class DramaSlayerApi(
     private val baseUrl: () -> String = { DramaSlayerConfig.apiBase },
     private val infProvider: DramaSlayerInfProvider = EmptyDramaSlayerInfProvider,
 ) {
@@ -42,18 +50,48 @@ internal class DramaSlayerApi(
         "User-Agent" to "okhttp/4.12.0",
     )
 
-    private fun decodeApiPayload(text: String): Any? {
-        val root = parseJsonValue(text)
-        val envelope = root as? org.json.JSONObject ?: return root
-        val raw = RawResponse.fromJson(envelope)
-        return if (raw != null) {
-            parseJsonValue(DramaSlayerCrypto.decrypt(raw))
-        } else {
-            envelope
+    private fun requestContext(context: DramaRequestContext): String {
+        return buildString {
+            append("operation=").append(context.operation)
+            context.dramaId?.let { append(" drama=").append(it) }
+            context.episodeId?.let { append(" episode=").append(it) }
+            context.page?.let { append(" page=").append(it.coerceAtLeast(1)) }
+            context.listType?.let { append(" list_type=").append(it) }
         }
     }
 
-    private suspend fun getPayload(url: String, cacheTime: Int): Any? {
+    private fun decodeApiPayload(text: String, context: DramaRequestContext): Any? {
+        val root = parseJsonValue(text)
+        logDramaSlayer("PAYLOAD_ROOT ${requestContext(context)} type=${dramaSlayerValueType(root)}")
+        val envelope = root as? org.json.JSONObject ?: return root
+        val raw = RawResponse.fromJson(envelope)
+        if (raw == null) {
+            logDramaSlayer("PAYLOAD_PLAINTEXT ${requestContext(context)}")
+            return envelope
+        }
+
+        logDramaSlayer("ENCRYPTED_PRESENT ${requestContext(context)} value=true")
+        return try {
+            val decrypted = parseJsonValue(DramaSlayerCrypto.decrypt(raw))
+            logDramaSlayer(
+                "DECRYPT_OK ${requestContext(context)} root=${dramaSlayerValueType(decrypted)}",
+            )
+            decrypted
+        } catch (error: Exception) {
+            logDramaSlayer(
+                "DECRYPT_FAILED ${requestContext(context)} " +
+                    "exception=${error::class.java.simpleName}",
+            )
+            null
+        }
+    }
+
+    private suspend fun getPayload(
+        url: String,
+        cacheTime: Int,
+        context: DramaRequestContext,
+    ): Any? {
+        logDramaSlayer("REQUEST_START method=GET ${requestContext(context)}")
         return try {
             val response = app.get(
                 url,
@@ -62,21 +100,30 @@ internal class DramaSlayerApi(
                 cacheTime = cacheTime,
             )
             if (response.code !in 200..299) {
-                logDramaSlayer("HTTP_FAILED method=GET endpoint=${url.substringBefore('?')} code=${response.code}")
+                logDramaSlayer(
+                    "HTTP_FAILED method=GET ${requestContext(context)} code=${response.code}",
+                )
                 null
             } else {
-                decodeApiPayload(response.text)
+                logDramaSlayer("HTTP_OK method=GET ${requestContext(context)} code=${response.code}")
+                decodeApiPayload(response.text, context)
             }
         } catch (error: Exception) {
             logDramaSlayer(
-                "REQUEST_FAILED method=GET endpoint=${url.substringBefore('?')} " +
+                "REQUEST_FAILED method=GET ${requestContext(context)} " +
                     "exception=${error::class.java.simpleName}",
             )
             null
         }
     }
 
-    private suspend fun postPayload(url: String, data: Map<String, String>, cacheTime: Int): Any? {
+    private suspend fun postPayload(
+        url: String,
+        data: Map<String, String>,
+        cacheTime: Int,
+        context: DramaRequestContext,
+    ): Any? {
+        logDramaSlayer("REQUEST_START method=POST ${requestContext(context)}")
         return try {
             val response = app.post(
                 url,
@@ -86,24 +133,31 @@ internal class DramaSlayerApi(
                 cacheTime = cacheTime,
             )
             if (response.code !in 200..299) {
-                logDramaSlayer("HTTP_FAILED method=POST endpoint=$url code=${response.code}")
+                logDramaSlayer(
+                    "HTTP_FAILED method=POST ${requestContext(context)} code=${response.code}",
+                )
                 null
             } else {
-                decodeApiPayload(response.text)
+                logDramaSlayer("HTTP_OK method=POST ${requestContext(context)} code=${response.code}")
+                decodeApiPayload(response.text, context)
             }
         } catch (error: Exception) {
             logDramaSlayer(
-                "REQUEST_FAILED method=POST endpoint=$url " +
+                "REQUEST_FAILED method=POST ${requestContext(context)} " +
                     "exception=${error::class.java.simpleName}",
             )
             null
         }
     }
 
-    private suspend fun publishedDrama(page: Int, keyword: String? = null): List<DramaItem> {
+    private suspend fun publishedDrama(
+        listType: String,
+        page: Int,
+        keyword: String? = null,
+    ): List<DramaItem> {
         val offset = dramaSlayerOffset(page)
         val requestJson = org.json.JSONObject()
-            .put("list_type", "all")
+            .put("list_type", listType)
             .put("_offset", offset)
             .put("_limit", DramaSlayerConfig.pageSize)
             .apply {
@@ -115,32 +169,57 @@ internal class DramaSlayerApi(
                 mapOf(
                     "json" to requestJson.toString(),
                     "offset" to offset.toString(),
-                    "list_type" to "all",
+                    "list_type" to listType,
                     "limit" to DramaSlayerConfig.pageSize.toString(),
                 ),
             ),
             cacheTime = 5,
+            context = DramaRequestContext(
+                operation = "CATALOG",
+                page = page,
+                listType = listType,
+            ),
         ) ?: return emptyList()
-        return parseDramaItems(payload.toString()).distinctBy { it.dramaId }
+        val items = parseDramaItems(payload.toString()).distinctBy { it.dramaId }
+        logDramaSlayer(
+            "CATALOG_PARSE_OK ${requestContext(DramaRequestContext("CATALOG", page = page, listType = listType))} " +
+                "count=${items.size}",
+        )
+        return items
     }
 
-    suspend fun search(query: String, page: Int = 1): List<DramaItem> {
-        return publishedDrama(page, query)
+    open suspend fun search(query: String, page: Int = 1): List<DramaItem> {
+        return publishedDrama("all", page, query)
     }
 
-    suspend fun getAll(page: Int = 1): List<DramaItem> {
-        return publishedDrama(page)
+    open suspend fun getPublishedDrama(listType: String, page: Int = 1): List<DramaItem> {
+        return publishedDrama(listType, page)
     }
 
-    suspend fun details(dramaId: String): DramaDetails? {
+    open suspend fun details(dramaId: String): DramaDetails? {
+        val context = DramaRequestContext(operation = "DETAIL", dramaId = dramaId)
         val payload = getPayload(
             withQuery(endpoint("drama-app-api/get-published-drama-info"), mapOf("drama_id" to dramaId)),
             cacheTime = 5,
+            context = context,
         ) ?: return null
-        return DramaDetails.fromJson(payload as? org.json.JSONObject ?: return null)
+        val details = parseDramaDetailsValue(payload)
+        if (details == null) {
+            logDramaSlayer("DETAIL_PARSE_FAILED ${requestContext(context)}")
+        } else {
+            logDramaSlayer(
+                "DETAIL_PARSE_OK ${requestContext(context)} root=${dramaSlayerValueType(payload)}",
+            )
+        }
+        return details
     }
 
     private suspend fun episodePayload(dramaId: String, episodeId: String? = null): Any? {
+        val context = DramaRequestContext(
+            operation = if (episodeId == null) "EPISODES" else "EPISODE_DETAIL",
+            dramaId = dramaId,
+            episodeId = episodeId,
+        )
         val json = org.json.JSONObject().put("drama_id", dramaId)
         if (episodeId != null) json.put("episode_id", episodeId)
         val inf = runCatching { infProvider.getInf() }.getOrElse {
@@ -151,17 +230,24 @@ internal class DramaSlayerApi(
             endpoint("drama-app-api/get-episodes-auth"),
             mapOf("inf" to inf, "json" to json.toString()),
             cacheTime = if (episodeId == null) 5 else 0,
+            context = context,
         )
     }
 
-    suspend fun episodes(dramaId: String): List<DramaEpisode> {
+    open suspend fun episodes(dramaId: String): List<DramaEpisode> {
         val payload = episodePayload(dramaId) ?: return emptyList()
-        return parseEpisodes(payload.toString())
+        val episodes = parseEpisodes(payload.toString())
+        logDramaSlayer("EPISODES_PARSE_OK operation=EPISODES drama=$dramaId count=${episodes.size}")
+        return episodes
     }
 
-    suspend fun episode(dramaId: String, episodeId: String): DramaEpisode? {
+    open suspend fun episode(dramaId: String, episodeId: String): DramaEpisode? {
         val payload = episodePayload(dramaId, episodeId) ?: return null
         val episodes = parseEpisodes(payload.toString())
+        logDramaSlayer(
+            "EPISODES_PARSE_OK operation=EPISODE_DETAIL drama=$dramaId episode=$episodeId " +
+                "count=${episodes.size}",
+        )
         return episodes.firstOrNull { it.episodeId == episodeId } ?: episodes.firstOrNull()
     }
 
