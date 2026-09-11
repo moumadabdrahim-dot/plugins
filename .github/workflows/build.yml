@@ -81,7 +81,7 @@ jobs:
         working-directory: template
         run: |
           chmod +x gradlew
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4 5 6; do
             if ./gradlew :AsiaTvPlugin:make :OscarTVPlugin:make :DramaSlayerPlugin:make \
               --no-daemon \
               --stacktrace \
@@ -89,7 +89,7 @@ jobs:
               exit 0
             fi
 
-            if [ "$attempt" -lt 3 ]; then
+            if [ "$attempt" -lt 6 ]; then
               echo "Gradle build attempt $attempt failed; retrying in 30 seconds"
               sleep 30
             fi
