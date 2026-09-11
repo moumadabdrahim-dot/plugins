@@ -35,7 +35,7 @@ jobs:
 
       - name: Copy plugin modules
         run: |
-          for plugin in AsiaTvPlugin OscarTVPlugin; do
+          for plugin in AsiaTvPlugin OscarTVPlugin DramaSlayerPlugin; do
             rm -rf "template/$plugin"
             cp -r "src/$plugin" "template/$plugin"
           done
@@ -81,7 +81,7 @@ jobs:
         working-directory: template
         run: |
           chmod +x gradlew
-          ./gradlew :AsiaTvPlugin:make :OscarTVPlugin:make \
+          ./gradlew :AsiaTvPlugin:make :OscarTVPlugin:make :DramaSlayerPlugin:make \
             --no-daemon \
             --stacktrace \
             --refresh-dependencies
@@ -93,7 +93,7 @@ jobs:
 
       - name: Publish plugin builds
         run: |
-          for plugin in AsiaTv OscarTV; do
+          for plugin in AsiaTv OscarTV DramaSlayer; do
             rm -f "$GITHUB_WORKSPACE/builds/$plugin.cs3"
 
             CS3_FILE="$(find "template/${plugin}Plugin" -type f -name "*.cs3" | head -n 1)"
@@ -115,12 +115,12 @@ jobs:
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
 
-          git add AsiaTv.cs3 OscarTV.cs3
+          git add AsiaTv.cs3 OscarTV.cs3 DramaSlayer.cs3
 
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
           fi
 
-          git commit -m "Build AsiaTv from $GITHUB_SHA"
+          git commit -m "Build plugins from $GITHUB_SHA"
           git push origin builds
