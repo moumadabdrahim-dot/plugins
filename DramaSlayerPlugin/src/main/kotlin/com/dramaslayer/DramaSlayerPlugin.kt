@@ -70,12 +70,12 @@ class DramaSlayerPlugin private constructor(
         val title = item.dramaName ?: item.alternativeTitles ?: return null
         val type = item.dramaType.toTvType()
         return if (type == TvType.Movie) {
-            newMovieSearchResponse(title, dramaUrl(id), TvType.Movie, fix = false) {
+            newMovieSearchResponse(title, DramaData(id).asData(), TvType.Movie, fix = false) {
                 posterUrl = item.posterUrl
                 year = item.releaseDate?.toIntOrNull()
             }
         } else {
-            newTvSeriesSearchResponse(title, dramaUrl(id), TvType.TvSeries, fix = false) {
+            newTvSeriesSearchResponse(title, DramaData(id).asData(), TvType.TvSeries, fix = false) {
                 posterUrl = item.posterUrl
                 year = item.releaseDate?.toIntOrNull()
             }
@@ -83,7 +83,8 @@ class DramaSlayerPlugin private constructor(
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val dramaId = parseDramaId(url) ?: return null
+        val dramaData = DramaData.parse(url) ?: return null
+        val dramaId = dramaData.dramaId
         logDramaSlayer("LOAD_START drama=$dramaId")
         val details = runCatching { api.details(dramaId) }.getOrElse {
             logDramaSlayer("LOAD_DETAILS_FAILED drama=$dramaId exception=${it::class.java.simpleName}")
@@ -111,7 +112,7 @@ class DramaSlayerPlugin private constructor(
             }
             val movieData = EpisodeData(dramaId, movieEpisodeId).asData()
             logDramaSlayer("LOAD_MAPPING_OK drama=$dramaId type=Movie episode=$movieEpisodeId")
-            return newMovieLoadResponse(title, dramaUrl(dramaId), TvType.Movie, movieData) {
+            return newMovieLoadResponse(title, DramaData(dramaId).asData(), TvType.Movie, movieData) {
                 posterUrl = poster
                 year = details.releaseDate?.toIntOrNull()
                 plot = details.description
@@ -133,7 +134,7 @@ class DramaSlayerPlugin private constructor(
             )
         }
         logDramaSlayer("LOAD_MAPPING_OK drama=$dramaId type=TvSeries episodes=${cloudStreamEpisodes.size}")
-        return newTvSeriesLoadResponse(title, dramaUrl(dramaId), TvType.TvSeries, cloudStreamEpisodes) {
+        return newTvSeriesLoadResponse(title, DramaData(dramaId).asData(), TvType.TvSeries, cloudStreamEpisodes) {
             posterUrl = poster
             year = details.releaseDate?.toIntOrNull()
             plot = details.description
@@ -154,15 +155,6 @@ class DramaSlayerPlugin private constructor(
             return false
         }
         return linkResolver.resolve(detail.episodeUrls, subtitleCallback, callback)
-    }
-
-    private fun dramaUrl(id: String): String = "dramaslayer://drama/${id.trim()}"
-}
-
-internal fun parseDramaId(url: String): String? {
-    if (!url.startsWith("dramaslayer://drama/", true)) return null
-    return url.substringAfterLast('/').trim().takeIf {
-        it.isNotBlank() && it.all { char -> char.isLetterOrDigit() || char == '-' || char == '_' }
     }
 }
 

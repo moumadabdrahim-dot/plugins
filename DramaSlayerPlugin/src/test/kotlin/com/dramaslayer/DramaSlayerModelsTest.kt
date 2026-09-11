@@ -35,10 +35,14 @@ class DramaSlayerModelsTest {
         val movie = assertNotNull(plugin.toSearchResponse(sampleItem("Movie")))
         assertTrue(movie is MovieSearchResponse)
         assertEquals(TvType.Movie, movie.type)
+        assertTrue(movie.url.trim().startsWith("{"))
+        assertTrue(!movie.url.contains("dramaslayer://drama/", ignoreCase = true))
 
         val series = assertNotNull(plugin.toSearchResponse(sampleItem("Series")))
         assertTrue(series is TvSeriesSearchResponse)
         assertEquals(TvType.TvSeries, series.type)
+        assertTrue(series.url.trim().startsWith("{"))
+        assertTrue(!series.url.contains("dramaslayer://drama/", ignoreCase = true))
     }
 
     @Test
@@ -106,8 +110,22 @@ class DramaSlayerModelsTest {
     }
 
     @Test
-    fun parsesDramaRouteId() {
-        assertEquals("2560", parseDramaId("dramaslayer://drama/2560"))
+    fun dramaDataSurvivesCloudStreamFixUrlAndParses() {
+        val plugin = DramaSlayerPlugin()
+        val data = DramaData("2560").asData()
+
+        assertTrue(data.trim().startsWith("{"))
+        assertEquals(data, plugin.fixUrl(data))
+        assertEquals("2560", DramaData.parse(data)?.dramaId)
+    }
+
+    @Test
+    fun dramaDataKeepsLegacyCacheCompatibility() {
+        assertEquals("2560", DramaData.parse("dramaslayer://drama/2560")?.dramaId)
+        assertEquals(
+            "2560",
+            DramaData.parse("https://drslayer.com/drama/public/dramaslayer://drama/2560")?.dramaId,
+        )
     }
 
     @Test
@@ -123,11 +141,13 @@ class DramaSlayerModelsTest {
         )
         val plugin = DramaSlayerPlugin(fakeApi)
 
-        val series = assertNotNull(plugin.load("dramaslayer://drama/8"))
+        val series = assertNotNull(plugin.load(DramaData("8").asData()))
         assertTrue(series is TvSeriesLoadResponse)
+        assertTrue(series.url.trim().startsWith("{"))
 
-        val movie = assertNotNull(plugin.load("dramaslayer://drama/2214"))
+        val movie = assertNotNull(plugin.load(DramaData("2214").asData()))
         assertTrue(movie is MovieLoadResponse)
+        assertTrue(movie.url.trim().startsWith("{"))
         assertEquals(
             EpisodeData("2214", "30591"),
             EpisodeData.parse(movie.dataUrl),
