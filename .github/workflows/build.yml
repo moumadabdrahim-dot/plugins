@@ -81,10 +81,20 @@ jobs:
         working-directory: template
         run: |
           chmod +x gradlew
-          ./gradlew :AsiaTvPlugin:make :OscarTVPlugin:make :DramaSlayerPlugin:make \
-            --no-daemon \
-            --stacktrace \
-            --refresh-dependencies
+          for attempt in 1 2 3; do
+            if ./gradlew :AsiaTvPlugin:make :OscarTVPlugin:make :DramaSlayerPlugin:make \
+              --no-daemon \
+              --stacktrace \
+              --refresh-dependencies; then
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              echo "Gradle build attempt $attempt failed; retrying in 30 seconds"
+              sleep 30
+            fi
+          done
+          exit 1
 
       - name: Find generated plugin
         run: |
@@ -107,7 +117,7 @@ jobs:
           done
 
           echo "Published:"
-          ls -lh "$GITHUB_WORKSPACE/builds/AsiaTv.cs3" "$GITHUB_WORKSPACE/builds/OscarTV.cs3"
+          ls -lh "$GITHUB_WORKSPACE/builds/AsiaTv.cs3" "$GITHUB_WORKSPACE/builds/OscarTV.cs3" "$GITHUB_WORKSPACE/builds/DramaSlayer.cs3"
 
       - name: Push builds branch
         working-directory: builds
